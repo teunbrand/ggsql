@@ -212,6 +212,121 @@ impl From<String> for ApiErrorResponse {
 }
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+#[cfg(feature = "duckdb")]
+fn load_sample_data(reader: &DuckDBReader) -> Result<(), VizqlError> {
+    use duckdb::params;
+
+    let conn = reader.connection();
+
+    // Create sample products table
+    conn.execute(
+        "CREATE TABLE products (
+            product_id INTEGER,
+            product_name VARCHAR,
+            category VARCHAR,
+            price DECIMAL(10,2)
+        )",
+        params![],
+    ).map_err(|e| VizqlError::ReaderError(format!("Failed to create products table: {}", e)))?;
+
+    conn.execute(
+        "INSERT INTO products VALUES
+            (1, 'Laptop', 'Electronics', 999.99),
+            (2, 'Mouse', 'Electronics', 25.50),
+            (3, 'Keyboard', 'Electronics', 75.00),
+            (4, 'Desk', 'Furniture', 299.99),
+            (5, 'Chair', 'Furniture', 199.99),
+            (6, 'Monitor', 'Electronics', 349.99),
+            (7, 'Lamp', 'Furniture', 45.00)",
+        params![],
+    ).map_err(|e| VizqlError::ReaderError(format!("Failed to insert products: {}", e)))?;
+
+    // Create sample sales table with more temporal data
+    conn.execute(
+        "CREATE TABLE sales (
+            sale_id INTEGER,
+            product_id INTEGER,
+            quantity INTEGER,
+            sale_date DATE,
+            region VARCHAR
+        )",
+        params![],
+    ).map_err(|e| VizqlError::ReaderError(format!("Failed to create sales table: {}", e)))?;
+
+    conn.execute(
+        "INSERT INTO sales VALUES
+            -- January 2024
+            (1, 1, 2, '2024-01-05', 'US'),
+            (2, 2, 5, '2024-01-05', 'EU'),
+            (3, 3, 3, '2024-01-05', 'APAC'),
+            (4, 1, 3, '2024-01-12', 'US'),
+            (5, 2, 4, '2024-01-12', 'EU'),
+            (6, 3, 2, '2024-01-12', 'APAC'),
+            (7, 4, 2, '2024-01-19', 'US'),
+            (8, 5, 1, '2024-01-19', 'EU'),
+            (9, 6, 2, '2024-01-19', 'APAC'),
+            (10, 1, 4, '2024-01-26', 'US'),
+            (11, 2, 3, '2024-01-26', 'EU'),
+            (12, 3, 5, '2024-01-26', 'APAC'),
+            -- February 2024
+            (13, 4, 3, '2024-02-02', 'US'),
+            (14, 5, 2, '2024-02-02', 'EU'),
+            (15, 6, 1, '2024-02-02', 'APAC'),
+            (16, 1, 5, '2024-02-09', 'US'),
+            (17, 2, 6, '2024-02-09', 'EU'),
+            (18, 3, 4, '2024-02-09', 'APAC'),
+            (19, 7, 2, '2024-02-16', 'US'),
+            (20, 4, 3, '2024-02-16', 'EU'),
+            (21, 5, 2, '2024-02-16', 'APAC'),
+            (22, 1, 6, '2024-02-23', 'US'),
+            (23, 2, 5, '2024-02-23', 'EU'),
+            (24, 6, 3, '2024-02-23', 'APAC'),
+            -- March 2024
+            (25, 3, 4, '2024-03-01', 'US'),
+            (26, 4, 5, '2024-03-01', 'EU'),
+            (27, 5, 3, '2024-03-01', 'APAC'),
+            (28, 1, 7, '2024-03-08', 'US'),
+            (29, 2, 6, '2024-03-08', 'EU'),
+            (30, 3, 5, '2024-03-08', 'APAC'),
+            (31, 6, 2, '2024-03-15', 'US'),
+            (32, 7, 3, '2024-03-15', 'EU'),
+            (33, 4, 4, '2024-03-15', 'APAC'),
+            (34, 1, 8, '2024-03-22', 'US'),
+            (35, 2, 7, '2024-03-22', 'EU'),
+            (36, 5, 6, '2024-03-22', 'APAC')",
+        params![],
+    ).map_err(|e| VizqlError::ReaderError(format!("Failed to insert sales: {}", e)))?;
+
+    // Create sample employees table
+    conn.execute(
+        "CREATE TABLE employees (
+            employee_id INTEGER,
+            employee_name VARCHAR,
+            department VARCHAR,
+            salary INTEGER,
+            hire_date DATE
+        )",
+        params![],
+    ).map_err(|e| VizqlError::ReaderError(format!("Failed to create employees table: {}", e)))?;
+
+    conn.execute(
+        "INSERT INTO employees VALUES
+            (1, 'Alice Johnson', 'Engineering', 95000, '2022-01-15'),
+            (2, 'Bob Smith', 'Engineering', 85000, '2022-03-20'),
+            (3, 'Carol Williams', 'Sales', 70000, '2022-06-10'),
+            (4, 'David Brown', 'Sales', 75000, '2023-01-05'),
+            (5, 'Eve Davis', 'Marketing', 65000, '2023-03-15'),
+            (6, 'Frank Miller', 'Engineering', 105000, '2021-09-01')",
+        params![],
+    ).map_err(|e| VizqlError::ReaderError(format!("Failed to insert employees: {}", e)))?;
+
+    Ok(())
+}
+
+// ============================================================================
 // Handler Functions
 // ============================================================================
 
@@ -230,6 +345,12 @@ async fn query_handler(
     #[cfg(feature = "duckdb")]
     if request.reader.starts_with("duckdb://") {
         let reader = DuckDBReader::from_connection_string(&request.reader)?;
+
+        // Load sample data for in-memory databases
+        if request.reader == "duckdb://memory" {
+            load_sample_data(&reader)?;
+        }
+
         let df = reader.execute(&sql_part)?;
 
         // Parse VizQL portion
