@@ -1,4 +1,4 @@
-//! Data source abstraction layer for vvSQL
+//! Data source abstraction layer for ggSQL
 //!
 //! The reader module provides a pluggable interface for executing SQL queries
 //! against various data sources and returning Polars DataFrames for visualization.
@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use vvsql::reader::{Reader, DuckDBReader};
+//! use ggsql::reader::{Reader, DuckDBReader};
 //!
 //! let reader = DuckDBReader::from_connection_string("duckdb://memory")?;
 //! let df = reader.execute("SELECT * FROM table")?;
@@ -46,7 +46,7 @@ pub trait Reader {
     ///
     /// # Errors
     ///
-    /// Returns `VvsqlError::ReaderError` if:
+    /// Returns `GgsqlError::ReaderError` if:
     /// - The SQL is invalid
     /// - The connection fails
     /// - The table or columns don't exist

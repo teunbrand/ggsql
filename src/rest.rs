@@ -1,18 +1,18 @@
 /*!
-vvSQL REST API Server
+ggSQL REST API Server
 
-Provides HTTP endpoints for executing vvSQL queries and returning visualization outputs.
+Provides HTTP endpoints for executing ggSQL queries and returning visualization outputs.
 
 ## Usage
 
 ```bash
-vvsql-rest --host 127.0.0.1 --port 3000
+ggsql-rest --host 127.0.0.1 --port 3000
 ```
 
 ## Endpoints
 
-- `POST /api/v1/query` - Execute a vvSQL query
-- `POST /api/v1/parse` - Parse a vvSQL query (debugging)
+- `POST /api/v1/query` - Execute a ggSQL query
+- `POST /api/v1/parse` - Parse a ggSQL query (debugging)
 - `GET /api/v1/health` - Health check
 - `GET /api/v1/version` - Version information
 */
@@ -31,18 +31,18 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use vvsql::{parser, VvsqlError, VERSION};
+use ggsql::{parser, GgsqlError, VERSION};
 
 #[cfg(feature = "duckdb")]
-use vvsql::reader::{DuckDBReader, Reader};
+use ggsql::reader::{DuckDBReader, Reader};
 
 #[cfg(feature = "vegalite")]
-use vvsql::writer::{VegaLiteWriter, Writer};
+use ggsql::writer::{VegaLiteWriter, Writer};
 
 /// CLI arguments for the REST API server
 #[derive(Parser)]
-#[command(name = "vvsql-rest")]
-#[command(about = "vvSQL REST API Server")]
+#[command(name = "ggsql-rest")]
+#[command(about = "ggSQL REST API Server")]
 #[command(version = VERSION)]
 struct Cli {
     /// Host address to bind to
@@ -84,7 +84,7 @@ struct AppState {
 /// Request body for /api/v1/query endpoint
 #[derive(Debug, Deserialize)]
 struct QueryRequest {
-    /// vvSQL query to execute
+    /// ggSQL query to execute
     query: String,
     /// Data source connection string (optional, default: duckdb://memory)
     #[serde(default = "default_reader")]
@@ -105,7 +105,7 @@ fn default_writer() -> String {
 /// Request body for /api/v1/parse endpoint
 #[derive(Debug, Deserialize)]
 struct ParseRequest {
-    /// vvSQL query to parse
+    /// ggSQL query to parse
     query: String,
 }
 
@@ -186,14 +186,14 @@ impl IntoResponse for ApiErrorResponse {
     }
 }
 
-impl From<VvsqlError> for ApiErrorResponse {
-    fn from(err: VvsqlError) -> Self {
+impl From<GgsqlError> for ApiErrorResponse {
+    fn from(err: GgsqlError) -> Self {
         let (status, error_type) = match &err {
-            VvsqlError::ParseError(_) => (StatusCode::BAD_REQUEST, "ParseError"),
-            VvsqlError::ValidationError(_) => (StatusCode::BAD_REQUEST, "ValidationError"),
-            VvsqlError::ReaderError(_) => (StatusCode::BAD_REQUEST, "ReaderError"),
-            VvsqlError::WriterError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "WriterError"),
-            VvsqlError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "InternalError"),
+            GgsqlError::ParseError(_) => (StatusCode::BAD_REQUEST, "ParseError"),
+            GgsqlError::ValidationError(_) => (StatusCode::BAD_REQUEST, "ValidationError"),
+            GgsqlError::ReaderError(_) => (StatusCode::BAD_REQUEST, "ReaderError"),
+            GgsqlError::WriterError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "WriterError"),
+            GgsqlError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "InternalError"),
         };
 
         ApiErrorResponse {
@@ -229,7 +229,7 @@ impl From<String> for ApiErrorResponse {
 // ============================================================================
 
 #[cfg(feature = "duckdb")]
-fn load_data_files(reader: &DuckDBReader, files: &[String]) -> Result<(), VvsqlError> {
+fn load_data_files(reader: &DuckDBReader, files: &[String]) -> Result<(), GgsqlError> {
     use std::path::Path;
     use duckdb::params;
 
@@ -239,7 +239,7 @@ fn load_data_files(reader: &DuckDBReader, files: &[String]) -> Result<(), VvsqlE
         let path = Path::new(file_path);
 
         if !path.exists() {
-            return Err(VvsqlError::ReaderError(format!("File not found: {}", file_path)));
+            return Err(GgsqlError::ReaderError(format!("File not found: {}", file_path)));
         }
 
         let extension = path.extension()
@@ -264,7 +264,7 @@ fn load_data_files(reader: &DuckDBReader, files: &[String]) -> Result<(), VvsqlE
                     table_name, file_path
                 );
                 conn.execute(&sql, params![])
-                    .map_err(|e| VvsqlError::ReaderError(format!("Failed to load CSV {}: {}", file_path, e)))?;
+                    .map_err(|e| GgsqlError::ReaderError(format!("Failed to load CSV {}: {}", file_path, e)))?;
             }
             "parquet" => {
                 // DuckDB can read Parquet directly
@@ -273,7 +273,7 @@ fn load_data_files(reader: &DuckDBReader, files: &[String]) -> Result<(), VvsqlE
                     table_name, file_path
                 );
                 conn.execute(&sql, params![])
-                    .map_err(|e| VvsqlError::ReaderError(format!("Failed to load Parquet {}: {}", file_path, e)))?;
+                    .map_err(|e| GgsqlError::ReaderError(format!("Failed to load Parquet {}: {}", file_path, e)))?;
             }
             "json" | "jsonl" | "ndjson" => {
                 // DuckDB can read JSON directly
@@ -282,10 +282,10 @@ fn load_data_files(reader: &DuckDBReader, files: &[String]) -> Result<(), VvsqlE
                     table_name, file_path
                 );
                 conn.execute(&sql, params![])
-                    .map_err(|e| VvsqlError::ReaderError(format!("Failed to load JSON {}: {}", file_path, e)))?;
+                    .map_err(|e| GgsqlError::ReaderError(format!("Failed to load JSON {}: {}", file_path, e)))?;
             }
             _ => {
-                return Err(VvsqlError::ReaderError(format!(
+                return Err(GgsqlError::ReaderError(format!(
                     "Unsupported file format: {} (supported: csv, parquet, json, jsonl, ndjson)",
                     extension
                 )));
@@ -299,7 +299,7 @@ fn load_data_files(reader: &DuckDBReader, files: &[String]) -> Result<(), VvsqlE
 }
 
 #[cfg(feature = "duckdb")]
-fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
+fn load_sample_data(reader: &DuckDBReader) -> Result<(), GgsqlError> {
     use duckdb::params;
 
     let conn = reader.connection();
@@ -313,7 +313,7 @@ fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
             price DECIMAL(10,2)
         )",
         params![],
-    ).map_err(|e| VvsqlError::ReaderError(format!("Failed to create products table: {}", e)))?;
+    ).map_err(|e| GgsqlError::ReaderError(format!("Failed to create products table: {}", e)))?;
 
     conn.execute(
         "INSERT INTO products VALUES
@@ -325,7 +325,7 @@ fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
             (6, 'Monitor', 'Electronics', 349.99),
             (7, 'Lamp', 'Furniture', 45.00)",
         params![],
-    ).map_err(|e| VvsqlError::ReaderError(format!("Failed to insert products: {}", e)))?;
+    ).map_err(|e| GgsqlError::ReaderError(format!("Failed to insert products: {}", e)))?;
 
     // Create sample sales table with more temporal data
     conn.execute(
@@ -337,7 +337,7 @@ fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
             region VARCHAR
         )",
         params![],
-    ).map_err(|e| VvsqlError::ReaderError(format!("Failed to create sales table: {}", e)))?;
+    ).map_err(|e| GgsqlError::ReaderError(format!("Failed to create sales table: {}", e)))?;
 
     conn.execute(
         "INSERT INTO sales VALUES
@@ -381,7 +381,7 @@ fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
             (35, 2, 7, '2024-03-22', 'EU'),
             (36, 5, 6, '2024-03-22', 'APAC')",
         params![],
-    ).map_err(|e| VvsqlError::ReaderError(format!("Failed to insert sales: {}", e)))?;
+    ).map_err(|e| GgsqlError::ReaderError(format!("Failed to insert sales: {}", e)))?;
 
     // Create sample employees table
     conn.execute(
@@ -393,7 +393,7 @@ fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
             hire_date DATE
         )",
         params![],
-    ).map_err(|e| VvsqlError::ReaderError(format!("Failed to create employees table: {}", e)))?;
+    ).map_err(|e| GgsqlError::ReaderError(format!("Failed to create employees table: {}", e)))?;
 
     conn.execute(
         "INSERT INTO employees VALUES
@@ -404,7 +404,7 @@ fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
             (5, 'Eve Davis', 'Marketing', 65000, '2023-03-15'),
             (6, 'Frank Miller', 'Engineering', 105000, '2021-09-01')",
         params![],
-    ).map_err(|e| VvsqlError::ReaderError(format!("Failed to insert employees: {}", e)))?;
+    ).map_err(|e| GgsqlError::ReaderError(format!("Failed to insert employees: {}", e)))?;
 
     Ok(())
 }
@@ -413,7 +413,7 @@ fn load_sample_data(reader: &DuckDBReader) -> Result<(), VvsqlError> {
 // Handler Functions
 // ============================================================================
 
-/// POST /api/v1/query - Execute a vvSQL query
+/// POST /api/v1/query - Execute a ggSQL query
 async fn query_handler(
     State(state): State<AppState>,
     Json(request): Json<QueryRequest>,
@@ -421,7 +421,7 @@ async fn query_handler(
     info!("Executing query: {} chars", request.query.len());
     info!("Reader: {}, Writer: {}", request.reader, request.writer);
 
-    // Split query into SQL and vvSQL portions
+    // Split query into SQL and ggSQL portions
     let (sql_part, _viz_part) = parser::split_query(&request.query)?;
 
     // Execute SQL portion using the reader
@@ -432,7 +432,7 @@ async fn query_handler(
             // Use pre-initialized reader from state
             let reader_mutex = state.reader.as_ref().unwrap();
             let reader = reader_mutex.lock()
-                .map_err(|e| VvsqlError::InternalError(format!("Failed to lock reader: {}", e)))?;
+                .map_err(|e| GgsqlError::InternalError(format!("Failed to lock reader: {}", e)))?;
             reader.execute(&sql_part)?
         } else {
             // Create a new reader for this request
@@ -441,7 +441,7 @@ async fn query_handler(
         };
 
 
-        // Parse vvSQL portion
+        // Parse ggSQL portion
         let specs = parser::parse_query(&request.query)?;
 
         if specs.is_empty() {
@@ -461,7 +461,7 @@ async fn query_handler(
             let writer = VegaLiteWriter::new();
             let json_output = writer.write(first_spec, &df)?;
             let spec_value: serde_json::Value = serde_json::from_str(&json_output)
-                .map_err(|e| VvsqlError::WriterError(format!("Failed to parse JSON: {}", e)))?;
+                .map_err(|e| GgsqlError::WriterError(format!("Failed to parse JSON: {}", e)))?;
 
             let result = QueryResult {
                 spec: spec_value,
@@ -497,7 +497,7 @@ async fn query_handler(
     )))
 }
 
-/// POST /api/v1/parse - Parse a vvSQL query
+/// POST /api/v1/parse - Parse a ggSQL query
 async fn parse_handler(
     Json(request): Json<ParseRequest>,
 ) -> Result<Json<ApiSuccess<ParseResult>>, ApiErrorResponse> {
@@ -506,7 +506,7 @@ async fn parse_handler(
     // Split query
     let (sql_part, viz_part) = parser::split_query(&request.query)?;
 
-    // Parse vvSQL portion
+    // Parse ggSQL portion
     let specs = parser::parse_query(&request.query)?;
 
     // Convert specs to JSON
@@ -559,7 +559,7 @@ async fn version_handler() -> Json<VersionResponse> {
 
 /// Root handler
 async fn root_handler() -> &'static str {
-    "vvSQL REST API Server - See /api/v1/health for status"
+    "ggSQL REST API Server - See /api/v1/health for status"
 }
 
 // ============================================================================
@@ -572,7 +572,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "vvsql_rest=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "ggsql_rest=info,tower_http=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -647,10 +647,10 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .expect("Invalid host or port");
 
-    info!("Starting vvSQL REST API server on {}", addr);
+    info!("Starting ggSQL REST API server on {}", addr);
     info!("API documentation:");
-    info!("  POST /api/v1/query  - Execute vvSQL query");
-    info!("  POST /api/v1/parse  - Parse vvSQL query");
+    info!("  POST /api/v1/query  - Execute ggSQL query");
+    info!("  POST /api/v1/parse  - Parse ggSQL query");
     info!("  GET  /api/v1/health - Health check");
     info!("  GET  /api/v1/version - Version info");
 

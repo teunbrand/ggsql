@@ -1,6 +1,6 @@
-# vvSQL Examples
+# ggSQL Examples
 
-This document provides a collection of basic examples demonstrating how to use vvSQL for data visualization.
+This document provides a collection of basic examples demonstrating how to use ggSQL for data visualization.
 
 ## Table of Contents
 
@@ -244,7 +244,7 @@ FACET WRAP category USING scales = 'free_y'
 
 ## Common Table Expressions (CTEs)
 
-vvSQL supports two patterns for working with CTEs:
+ggSQL supports two patterns for working with CTEs:
 
 1. **Traditional Pattern**: `WITH ... SELECT ... VISUALISE AS`
 2. **Shorthand Pattern**: `WITH ... VISUALISE FROM <cte> AS` (injected SELECT)
@@ -549,7 +549,7 @@ LABEL title = 'Distribution of Vehicles by Number of Cylinders',
 
 ## Case Insensitivity
 
-vvSQL keywords are case-insensitive. All of the following are valid:
+ggSQL keywords are case-insensitive. All of the following are valid:
 
 ```sql
 -- Uppercase (traditional)
@@ -593,20 +593,20 @@ With Line Using x = date, y = value
 
 ```bash
 # Parse and validate
-vvsql parse query.sql
+ggsql parse query.sql
 
 # Execute and generate Vega-Lite JSON
-vvsql exec query.sql --writer vegalite --output chart.vl.json
+ggsql exec query.sql --writer vegalite --output chart.vl.json
 
 # Execute from file
-vvsql run query.sql
+ggsql run query.sql
 ```
 
 ### Using the REST API
 
 ```bash
 # Start the server with sample data
-vvsql-rest --load-sample-data --port 3334
+ggsql-rest --load-sample-data --port 3334
 
 # Execute a query via HTTP
 curl -X POST http://localhost:3334/api/v1/query \
@@ -629,4 +629,4 @@ npm run dev
 
 - See [CLAUDE.md](CLAUDE.md) for full system architecture and implementation details
 - See [README.md](README.md) for installation and setup instructions
-- See the `tree-sitter-vvsql/test/corpus/` directory for more grammar examples
+- See the `tree-sitter-ggsql/test/corpus/` directory for more grammar examples

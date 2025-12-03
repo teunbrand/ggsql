@@ -1,10 +1,10 @@
-# vvSQL System Architecture & Implementation Summary
+# ggSQL System Architecture & Implementation Summary
 
 ## Overview
 
-**vvSQL** is a SQL extension for declarative data visualization based on Grammar of Graphics principles. It allows users to combine SQL data queries with visualization specifications in a single, composable syntax.
+**ggSQL** is a SQL extension for declarative data visualization based on Grammar of Graphics principles. It allows users to combine SQL data queries with visualization specifications in a single, composable syntax.
 
-**Core Innovation**: vvSQL extends standard SQL with a `VISUALISE AS` clause that separates data retrieval (SQL) from visual encoding (Grammar of Graphics), enabling terminal visualization operations that produce charts instead of relational data.
+**Core Innovation**: ggSQL extends standard SQL with a `VISUALISE AS` clause that separates data retrieval (SQL) from visual encoding (Grammar of Graphics), enabling terminal visualization operations that produce charts instead of relational data.
 
 ```sql
 SELECT date, revenue, region FROM sales WHERE year = 2024
@@ -33,7 +33,7 @@ THEME minimal
 
 ## VISUALISE FROM Feature
 
-vvSQL supports two patterns for creating visualizations:
+ggSQL supports two patterns for creating visualizations:
 
 ### Traditional Pattern: SELECT ... VISUALISE AS
 
@@ -84,7 +84,7 @@ The parser enforces that `VISUALISE FROM` cannot be combined with trailing SELEC
 
 ### Implementation Details
 
-**1. Grammar Changes** (`tree-sitter-vvsql/grammar.js`):
+**1. Grammar Changes** (`tree-sitter-ggsql/grammar.js`):
 - Line 71-77: Updated `with_statement` to include `optional($.select_statement)`, allowing WITH to be followed by SELECT as a compound statement
 - Lines 158-172: Made `subquery` rule fully recursive to support complex SQL (VALUES, nested subqueries)
 
@@ -106,7 +106,7 @@ The parser enforces that `VISUALISE FROM` cannot be combined with trailing SELEC
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       vvSQL Query                            │
+│                       ggSQL Query                            │
 │  "SELECT ... FROM ... WHERE ... VISUALISE AS PLOT WITH ..."  │
 └────────────────────────┬────────────────────────────────────┘
                          │
@@ -238,14 +238,14 @@ pub fn split_query(query: &str) -> Result<(String, String)> {
 
 #### Tree-sitter Integration (`mod.rs`)
 
-- Uses `tree-sitter-vvsql` grammar (293 lines, simplified approach)
+- Uses `tree-sitter-ggsql` grammar (293 lines, simplified approach)
 - Parses **full query** (SQL + VISUALISE) into concrete syntax tree (CST)
 - Grammar supports: PLOT/TABLE/MAP types, WITH/SCALE/FACET/COORD/LABEL/GUIDE/THEME clauses
 - British and American spellings: `VISUALISE` / `VISUALIZE`
 - **SQL portion parsing**: Basic SQL structure (SELECT, WITH, CREATE, INSERT, subqueries)
 - **Recursive subquery support**: Fully recursive grammar for complex SQL
 
-**Grammar Structure** (`tree-sitter-vvsql/grammar.js`):
+**Grammar Structure** (`tree-sitter-ggsql/grammar.js`):
 
 Key grammar rules:
 - `query`: Root node containing SQL + VISUALISE portions
@@ -307,7 +307,7 @@ pub fn build_ast(tree: &Tree, source: &str) -> Result<Vec<VizSpec>> {
 
             // Validate VISUALISE FROM usage
             if spec.source.is_some() && last_is_select {
-                return Err(VvsqlError::ParseError(
+                return Err(GgsqlError::ParseError(
                     "Cannot use VISUALISE FROM when the last SQL statement is SELECT. \
                      Use either 'SELECT ... VISUALISE AS' or remove the SELECT and use \
                      'VISUALISE FROM ... AS'.".to_string()
@@ -428,7 +428,7 @@ impl fmt::Display for ParseError {
 
 - Precise error location reporting for user-friendly diagnostics
 - Context information helps identify where parsing failed
-- Converts to VvsqlError for unified error handling
+- Converts to GgsqlError for unified error handling
 
 ---
 
@@ -668,14 +668,14 @@ for layer in &spec.layers {
 
 ### 4. REST API (`src/rest.rs`)
 
-**Responsibility**: HTTP interface for executing vvSQL queries.
+**Responsibility**: HTTP interface for executing ggSQL queries.
 
 **Technology**: Axum web framework with CORS support
 
 **Endpoints**:
 
 ```rust
-// POST /api/v1/query - Execute vvSQL query
+// POST /api/v1/query - Execute ggSQL query
 // Request:
 {
   "query": "SELECT ... VISUALISE AS PLOT ...",
@@ -719,16 +719,16 @@ for layer in &spec.layers {
 
 ```bash
 # Basic usage
-vvsql-rest --host 127.0.0.1 --port 3334
+ggsql-rest --host 127.0.0.1 --port 3334
 
 # With sample data (pre-loaded products, sales, employees tables)
-vvsql-rest --load-sample-data
+ggsql-rest --load-sample-data
 
 # Load custom data files (CSV, Parquet, JSON)
-vvsql-rest --load-data data.csv --load-data other.parquet
+ggsql-rest --load-data data.csv --load-data other.parquet
 
 # Configure CORS origins
-vvsql-rest --cors-origin "http://localhost:5173,http://localhost:3000"
+ggsql-rest --cors-origin "http://localhost:5173,http://localhost:3000"
 ```
 
 **Sample Data Loading**:
@@ -748,19 +748,19 @@ vvsql-rest --cors-origin "http://localhost:5173,http://localhost:3000"
 
 ```bash
 # Parse query and show AST
-vvsql parse "SELECT ... VISUALISE AS PLOT ..."
+ggsql parse "SELECT ... VISUALISE AS PLOT ..."
 
 # Execute query and generate output
-vvsql exec "SELECT ... VISUALISE AS PLOT ..." \
+ggsql exec "SELECT ... VISUALISE AS PLOT ..." \
   --reader duckdb://memory \
   --writer vegalite \
   --output viz.vl.json
 
 # Execute query from file
-vvsql run query.sql --writer vegalite
+ggsql run query.sql --writer vegalite
 
 # Validate query syntax
-vvsql validate query.sql
+ggsql validate query.sql
 ```
 
 **Features**:
@@ -774,7 +774,7 @@ vvsql validate query.sql
 
 ### 6. Test Application (`test-app/`)
 
-**Responsibility**: Interactive web UI for testing vvSQL queries.
+**Responsibility**: Interactive web UI for testing ggSQL queries.
 
 **Technology Stack**:
 
@@ -827,7 +827,7 @@ npm run dev  # Starts on http://localhost:5173
 
 ## Grammar Deep Dive
 
-### vvSQL Grammar Structure
+### ggSQL Grammar Structure
 
 ```sql
 [SELECT ...] VISUALISE AS <type> [clauses]...

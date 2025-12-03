@@ -1,21 +1,21 @@
 /*!
-vvSQL Command Line Interface
+ggSQL Command Line Interface
 
-Provides commands for executing vvSQL queries with various data sources and output formats.
+Provides commands for executing ggSQL queries with various data sources and output formats.
 */
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use vvsql::{parser, VERSION};
+use ggsql::{parser, VERSION};
 
 #[cfg(feature = "duckdb")]
-use vvsql::reader::{Reader, DuckDBReader};
+use ggsql::reader::{Reader, DuckDBReader};
 
 #[cfg(feature = "vegalite")]
-use vvsql::writer::{Writer, VegaLiteWriter};
+use ggsql::writer::{Writer, VegaLiteWriter};
 
 #[derive(Parser)]
-#[command(name = "vvsql")]
+#[command(name = "ggsql")]
 #[command(about = "SQL extension for declarative data visualization")]
 #[command(version = VERSION)]
 pub struct Cli {
@@ -25,9 +25,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Execute a vvSQL query
+    /// Execute a ggSQL query
     Exec {
-        /// The vvSQL query to execute
+        /// The ggSQL query to execute
         query: String,
 
         /// Data source connection string
@@ -47,9 +47,9 @@ pub enum Commands {
         verbose: bool,
     },
 
-    /// Execute a vvSQL query from a file
+    /// Execute a ggSQL query from a file
     Run {
-        /// Path to .sql file containing vvSQL query
+        /// Path to .sql file containing ggSQL query
         file: PathBuf,
 
         /// Data source connection string
@@ -71,7 +71,7 @@ pub enum Commands {
 
     /// Parse a query and show the AST (for debugging)
     Parse {
-        /// The vvSQL query to parse
+        /// The ggSQL query to parse
         query: String,
 
         /// Output format for AST (json, debug, pretty)
@@ -81,7 +81,7 @@ pub enum Commands {
 
     /// Validate a query without executing
     Validate {
-        /// The vvSQL query to validate
+        /// The ggSQL query to validate
         query: String,
 
         /// Data source connection string (needed for column validation)
@@ -104,13 +104,13 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            // Split query into SQL and vvSQL portions
+            // Split query into SQL and ggSQL portions
             match parser::split_query(&query) {
                 Ok((sql_part, viz_part)) => {
                     if verbose {
                         eprintln!("\nQuery split:");
                         eprintln!("  SQL portion: {} chars", sql_part.len());
-                        eprintln!("  vvSQL portion: {} chars", viz_part.len());
+                        eprintln!("  ggSQL portion: {} chars", viz_part.len());
                     }
 
                     // Execute SQL portion using the reader
@@ -126,7 +126,7 @@ fn main() -> anyhow::Result<()> {
                                             eprintln!("Columns: {:?}", df.get_column_names());
                                         }
 
-                                        // Parse vvSQL portion
+                                        // Parse ggSQL portion
                                         match parser::parse_query(&query) {
                                             Ok(specs) => {
                                                 if verbose {
@@ -185,7 +185,7 @@ fn main() -> anyhow::Result<()> {
                                                 }
                                             }
                                             Err(e) => {
-                                                eprintln!("Failed to parse vvSQL portion: {}", e);
+                                                eprintln!("Failed to parse ggSQL portion: {}", e);
                                                 std::process::exit(1);
                                             }
                                         }
@@ -239,7 +239,7 @@ fn main() -> anyhow::Result<()> {
                             if verbose {
                                 eprintln!("\nQuery split:");
                                 eprintln!("  SQL portion: {} chars", sql_part.len());
-                                eprintln!("  vvSQL portion: {} chars", viz_part.len());
+                                eprintln!("  ggSQL portion: {} chars", viz_part.len());
                             }
 
                             // Execute SQL portion using the reader
@@ -255,7 +255,7 @@ fn main() -> anyhow::Result<()> {
                                                     eprintln!("Columns: {:?}", df.get_column_names());
                                                 }
 
-                                                // Parse vvSQL portion
+                                                // Parse ggSQL portion
                                                 match parser::parse_query(&query) {
                                                     Ok(specs) => {
                                                         if verbose {
@@ -314,7 +314,7 @@ fn main() -> anyhow::Result<()> {
                                                         }
                                                     }
                                                     Err(e) => {
-                                                        eprintln!("Failed to parse vvSQL portion: {}", e);
+                                                        eprintln!("Failed to parse ggSQL portion: {}", e);
                                                         std::process::exit(1);
                                                     }
                                                 }
@@ -365,7 +365,7 @@ fn main() -> anyhow::Result<()> {
                         "json" => println!("{}", serde_json::to_string_pretty(&specs)?),
                         "debug" => println!("{:#?}", specs),
                         "pretty" => {
-                            println!("vvSQL Specifications: {} total", specs.len());
+                            println!("ggSQL Specifications: {} total", specs.len());
                             for (i, spec) in specs.iter().enumerate() {
                                 println!("\nVisualization #{} ({:?}):", i + 1, spec.viz_type);
                                 println!("  Layers: {}", spec.layers.len());

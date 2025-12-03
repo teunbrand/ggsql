@@ -1,5 +1,5 @@
 [package]
-name = "vvsql"
+name = "ggsql"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,22 +9,22 @@ homepage.workspace = true
 description.workspace = true
 
 [lib]
-name = "vvsql"
+name = "ggsql"
 path = "lib.rs"
 
 [[bin]]
-name = "vvsql"
+name = "ggsql"
 path = "cli.rs"
 
 [[bin]]
-name = "vvsql-rest"
+name = "ggsql-rest"
 path = "rest.rs"
 required-features = ["rest-api"]
 
 [dependencies]
 # Parsing
 tree-sitter.workspace = true
-tree-sitter-vvsql = { path = "../tree-sitter-vvsql" }
+tree-sitter-ggsql = { path = "../tree-sitter-ggsql" }
 
 # Data processing
 polars.workspace = true

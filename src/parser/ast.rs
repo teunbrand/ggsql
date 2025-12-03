@@ -1,8 +1,8 @@
-//! AST (Abstract Syntax Tree) types for vvSQL specification
+//! AST (Abstract Syntax Tree) types for ggSQL specification
 //!
-//! This module defines the typed AST structures that represent parsed vvSQL queries.
+//! This module defines the typed AST structures that represent parsed ggSQL queries.
 //! The AST is built from the tree-sitter CST (Concrete Syntax Tree) and provides
-//! a more convenient, typed interface for working with vvSQL specifications.
+//! a more convenient, typed interface for working with ggSQL specifications.
 //!
 //! # AST Structure
 //!
@@ -21,7 +21,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Complete vvSQL visualization specification
+/// Complete ggSQL visualization specification
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VizSpec {
     /// Visualization output type (PLOT, TABLE, etc.)

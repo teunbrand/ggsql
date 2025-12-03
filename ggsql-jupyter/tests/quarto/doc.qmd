@@ -1,0 +1,42 @@
+---
+title: test
+keep-ipynb: true # TODO: Why does render on save fail without this?
+---
+
+<!-- TODO: Why do only the later plots appear? Probably related to how we are returning vega JS from jupyter -->
+
+```{ggsql}
+SELECT * FROM 'mtcars.csv' LIMIT 5
+```
+
+```{ggsql}
+SELECT
+  am,
+  carb,
+  AVG(mpg) as ampg,
+  AVG(hp) as ahp
+FROM 'mtcars.csv'
+GROUP BY am, carb
+
+VISUALISE AS PLOT
+WITH line USING x = carb, y = ahp, color = 'blue'
+WITH bar USING x = carb, y = ampg, color = 'red'
+LABEL title = 'Some data'
+FACET WRAP am
+```
+
+```{ggsql}
+WITH cte AS (
+    SELECT hp, mpg, carb
+    FROM 'mtcars.csv'
+    WHERE hp > 100
+)
+VISUALISE FROM cte AS plot
+WITH point USING x = hp, y = mpg, color = carb
+```
+
+```{ggsql}
+CREATE TEMP TABLE t1 AS SELECT hp, mpg, carb FROM 'mtcars.csv' WHERE hp > 100;
+VISUALISE FROM t1 AS plot
+WITH point USING x = hp, y = mpg, color = carb
+```
