@@ -18,13 +18,11 @@ THEME minimal
 
 **Statistics**:
 
-- ~6,500 lines of Rust code (+1,200 for COORD implementation)
-- 293-line Tree-sitter grammar (simplified, no external scanner)
-- ~820 lines of TypeScript/React code in test application
-- 9 React components (4 main + 5 shadcn/ui components)
+- ~7,500 lines of Rust code (including COORD implementation)
+- 507-line Tree-sitter grammar (simplified, no external scanner)
 - Full bindings: Rust, C, Python, Node.js with tree-sitter integration
 - Syntax highlighting support via Tree-sitter queries
-- 148 total tests (60 for parser/builder, including 32 comprehensive edge cases)
+- 166 total tests (comprehensive parser, builder, and integration tests)
 - End-to-end working pipeline: SQL → Data → Visualization
 - Coordinate transformations: Cartesian (xlim/ylim), Flip, Polar
 - VISUALISE FROM shorthand syntax with automatic SELECT injection
@@ -68,7 +66,7 @@ WITH line USING x = month, y = total
 
 ### Validation Rules
 
-The parser enforces that `VISUALISE FROM` cannot be combined with trailing SELECT statements:
+The parser enforces strict rules about when `VISUALISE FROM` can be used:
 
 **✅ Valid:**
 - `VISUALISE FROM table AS PLOT` - Direct table (injected SELECT)
@@ -79,8 +77,13 @@ The parser enforces that `VISUALISE FROM` cannot be combined with trailing SELEC
 **❌ Invalid (Parse Error):**
 - `SELECT * FROM x VISUALISE FROM y AS PLOT` - Cannot mix SELECT with VISUALISE FROM
 - `WITH cte AS (...) SELECT * FROM cte VISUALISE FROM cte AS PLOT` - Trailing SELECT conflicts
+- `CREATE TABLE x AS SELECT 1; WITH cte AS (...) VISUALISE FROM cte AS PLOT` - Cannot use after CREATE/INSERT/UPDATE/DELETE
+- `INSERT INTO x VALUES (1) VISUALISE FROM x AS PLOT` - VISUALISE FROM only allowed standalone or after WITH
 
-**Rationale**: Prevents ambiguity about which data source to visualize. The parser validates this by checking if the last SQL statement is a SELECT before allowing VISUALISE FROM.
+**Rationale**:
+1. Prevents ambiguity about which data source to visualize
+2. VISUALISE FROM is designed for two use cases: direct table visualization or CTE visualization
+3. Other SQL statements (CREATE, INSERT, UPDATE, DELETE) don't produce meaningful result sets to visualize
 
 ### Implementation Details
 
@@ -89,13 +92,14 @@ The parser enforces that `VISUALISE FROM` cannot be combined with trailing SELEC
 - Lines 158-172: Made `subquery` rule fully recursive to support complex SQL (VALUES, nested subqueries)
 
 **2. Query Splitter** (`src/parser/splitter.rs`):
-- Lines 60-92: Checks for VISUALISE FROM and injects `SELECT * FROM <source>`
-- Handles semicolons correctly: adds semicolon before injected SELECT if needed
-- Special case for WITH statements: no semicolon needed between `WITH cte AS (...) SELECT * FROM cte`
+- Lines 60-87: Checks for VISUALISE FROM and injects `SELECT * FROM <source>`
+- Validates that VISUALISE FROM is only used standalone or after WITH statements
+- Errors if VISUALISE FROM appears after CREATE, INSERT, UPDATE, or DELETE statements
+- WITH followed by SELECT: no semicolon needed (compound statement)
 
 **3. AST Builder Validation** (`src/parser/builder.rs`):
 - Lines 43-50: Validates VISUALISE FROM usage after parsing
-- Lines 1021-1065: Recursive validation to detect trailing SELECT in compound statements
+- Lines 1058-1072: Recursive validation to detect trailing SELECT in compound statements
 - `with_statement_has_trailing_select()` helper distinguishes internal CTEs from trailing SELECT
 
 ---
@@ -176,7 +180,7 @@ The parser enforces that `VISUALISE FROM` cannot be combined with trailing SELEC
 **Key Features:**
 1. **Byte offset splitting**: Uses character positions instead of parse tree node boundaries
 2. **SELECT injection**: Automatically adds `SELECT * FROM <source>` when VISUALISE FROM is used
-3. **Semicolon handling**: Adds semicolons correctly between statements, with special case for WITH
+3. **Validation**: Ensures VISUALISE FROM is only used standalone or after WITH statements
 
 ```rust
 pub fn split_query(query: &str) -> Result<(String, String)> {
@@ -205,22 +209,18 @@ pub fn split_query(query: &str) -> Result<(String, String)> {
             if let Some(from_identifier) = extract_from_identifier(&child, query) {
                 // Inject SELECT * FROM <source>
                 if modified_sql.trim().is_empty() {
+                    // Standalone VISUALISE FROM - inject SELECT
                     modified_sql = format!("SELECT * FROM {}", from_identifier);
                 } else {
-                    // Handle semicolons correctly
+                    // VISUALISE FROM can only be used after WITH statements
                     let trimmed = modified_sql.trim();
-                    let last_is_with = trimmed.to_uppercase().starts_with("WITH");
-
-                    if last_is_with {
-                        // WITH followed by SELECT - no semicolon
-                        modified_sql = format!("{} SELECT * FROM {}", trimmed, from_identifier);
-                    } else if trimmed.ends_with(';') {
-                        // Already has semicolon
-                        modified_sql = format!("{} SELECT * FROM {}", trimmed, from_identifier);
-                    } else {
-                        // Add semicolon before SELECT
-                        modified_sql = format!("{}; SELECT * FROM {}", trimmed, from_identifier);
+                    if !trimmed.to_uppercase().starts_with("WITH") {
+                        return Err(GgsqlError::ParseError(
+                            "VISUALISE FROM can only be used standalone or after WITH statements."
+                        ));
                     }
+                    // WITH followed by SELECT - no semicolon needed (compound statement)
+                    modified_sql = format!("{} SELECT * FROM {}", trimmed, from_identifier);
                 }
                 break;
             }
@@ -238,7 +238,7 @@ pub fn split_query(query: &str) -> Result<(String, String)> {
 
 #### Tree-sitter Integration (`mod.rs`)
 
-- Uses `tree-sitter-ggsql` grammar (293 lines, simplified approach)
+- Uses `tree-sitter-ggsql` grammar (507 lines, simplified approach)
 - Parses **full query** (SQL + VISUALISE) into concrete syntax tree (CST)
 - Grammar supports: PLOT/TABLE/MAP types, WITH/SCALE/FACET/COORD/LABEL/GUIDE/THEME clauses
 - British and American spellings: `VISUALISE` / `VISUALIZE`
@@ -363,20 +363,36 @@ pub struct VizSpec {
 }
 
 pub struct Layer {
-    pub geom: Geom,                  // point, line, bar, etc.
-    pub aesthetics: HashMap<String, AestheticValue>,
-    pub name: Option<String>,
+    pub name: Option<String>,        // Layer name (from AS clause)
+    pub geom: Geom,                  // Geometric object type
+    pub aesthetics: HashMap<String, AestheticValue>,  // Aesthetic mappings
+    pub parameters: HashMap<String, ParameterValue>,  // Geom parameters (not aesthetics)
 }
 
 pub enum Geom {
-    Point, Line, Bar, Area, Tile, Ribbon,
-    Histogram, Density, Smooth, Boxplot,
-    Text, Segment, HLine, VLine,
+    // Basic geoms
+    Point, Line, Path, Bar, Col, Area, Tile, Polygon, Ribbon,
+    // Statistical geoms
+    Histogram, Density, Smooth, Boxplot, Violin,
+    // Annotation geoms
+    Text, Label, Segment, Arrow, HLine, VLine, AbLine, ErrorBar,
 }
 
 pub enum AestheticValue {
-    Column(String),                  // Unquoted: x = revenue
-    Literal(Value),                  // Quoted: color = 'blue'
+    Column(String),                  // Unquoted column reference: x = revenue
+    Literal(LiteralValue),           // Quoted literal: color = 'blue'
+}
+
+pub enum LiteralValue {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+}
+
+pub enum ParameterValue {
+    String(String),
+    Number(f64),
+    Boolean(bool),
 }
 
 pub struct Scale {
@@ -386,17 +402,96 @@ pub struct Scale {
 }
 
 pub enum ScaleType {
-    Linear, Log10, Sqrt, Reverse,
+    // Continuous scales
+    Linear, Log10, Log, Log2, Sqrt, Reverse,
+    // Discrete scales
     Ordinal, Categorical,
+    // Temporal scales
     Date, DateTime, Time,
-    Viridis, Plasma, Magma, // Color palettes
+    // Color palettes
+    Viridis, Plasma, Magma, Inferno, Cividis, Diverging, Sequential,
+}
+
+pub enum Facet {
+    /// FACET WRAP variables
+    Wrap {
+        variables: Vec<String>,
+        scales: FacetScales,
+    },
+    /// FACET rows BY cols
+    Grid {
+        rows: Vec<String>,
+        cols: Vec<String>,
+        scales: FacetScales,
+    },
+}
+
+pub enum FacetScales {
+    Fixed,      // 'fixed' - same scales across all facets
+    Free,       // 'free' - independent scales for each facet
+    FreeX,      // 'free_x' - independent x-axis, shared y-axis
+    FreeY,      // 'free_y' - independent y-axis, shared x-axis
+}
+
+pub struct Coord {
+    pub coord_type: CoordType,
+    pub properties: HashMap<String, CoordPropertyValue>,
+}
+
+pub enum CoordType {
+    Cartesian,  // Standard x/y coordinates
+    Polar,      // Polar coordinates (pie charts, rose plots)
+    Flip,       // Flipped Cartesian (swaps x and y)
+    Fixed,      // Fixed aspect ratio
+    Trans,      // Transformed coordinates
+    Map,        // Map projections
+    QuickMap,   // Quick map approximation
+}
+
+pub struct Labels {
+    pub labels: HashMap<String, String>,  // label type → text
+}
+
+pub struct Guide {
+    pub aesthetic: String,
+    pub guide_type: Option<GuideType>,
+    pub properties: HashMap<String, GuidePropertyValue>,
+}
+
+pub enum GuideType {
+    Legend,
+    ColorBar,
+    Axis,
+    None,
+}
+
+pub struct Theme {
+    pub style: Option<String>,
+    pub properties: HashMap<String, ThemePropertyValue>,
 }
 ```
 
 **Key Methods**:
 
-- `VizSpec::find_scale()` - Look up scale specification for an aesthetic
-- Type conversions for JSON serialization/deserialization
+**VizSpec methods:**
+- `VizSpec::new(viz_type)` - Create a new empty VizSpec
+- `VizSpec::find_scale(aesthetic)` - Look up scale specification for an aesthetic
+- `VizSpec::find_layer(name)` - Find a layer by name
+- `VizSpec::find_guide(aesthetic)` - Find a guide specification for an aesthetic
+- `VizSpec::has_layers()` - Check if VizSpec has any layers
+- `VizSpec::layer_count()` - Get the number of layers
+
+**Layer methods:**
+- `Layer::new(geom)` - Create a new layer with a geom
+- `Layer::with_name(name)` - Set the layer name (builder pattern)
+- `Layer::with_aesthetic(aesthetic, value)` - Add an aesthetic mapping (builder pattern)
+- `Layer::with_parameter(parameter, value)` - Add a geom parameter (builder pattern)
+- `Layer::get_column(aesthetic)` - Get column name for an aesthetic (if mapped to column)
+- `Layer::get_literal(aesthetic)` - Get literal value for an aesthetic (if literal)
+- `Layer::validate_required_aesthetics()` - Validate that required aesthetics are present for the geom type
+
+**Type conversions:**
+- JSON serialization/deserialization for all AST types via Serde
 
 #### Error Handling (`error.rs`)
 
@@ -429,6 +524,30 @@ impl fmt::Display for ParseError {
 - Precise error location reporting for user-friendly diagnostics
 - Context information helps identify where parsing failed
 - Converts to GgsqlError for unified error handling
+
+#### Main Error Type (`lib.rs`)
+
+The library uses a unified error type for all operations:
+
+```rust
+pub enum GgsqlError {
+    ParseError(String),        // Query parsing errors
+    ValidationError(String),   // Semantic validation errors
+    ReaderError(String),       // Data source errors
+    WriterError(String),       // Output generation errors
+    InternalError(String),     // Unexpected internal errors
+}
+
+pub type Result<T> = std::result::Result<T, GgsqlError>;
+```
+
+**Error Types**:
+
+- **ParseError**: Tree-sitter parsing failures, invalid syntax
+- **ValidationError**: Semantic errors (missing required aesthetics, type mismatches)
+- **ReaderError**: Database connection failures, SQL errors, missing tables/columns
+- **WriterError**: Vega-Lite generation errors, file I/O errors
+- **InternalError**: Unexpected conditions that should not occur
 
 ---
 
@@ -502,6 +621,22 @@ pub fn parse_connection_string(uri: &str) -> Result<ConnectionInfo> {
     // duckdb:///path/to/file.db → File-based database
 }
 ```
+
+#### Planned Readers (Not Yet Implemented)
+
+The codebase includes connection string parsing and feature flags for additional readers, but they are not yet implemented:
+
+- **PostgreSQL Reader** (`postgres://...`)
+  - Feature flag: `postgres`
+  - Connection string parsing exists in `connection.rs`
+  - Reader implementation: Not yet available
+
+- **SQLite Reader** (`sqlite://...`)
+  - Feature flag: `sqlite`
+  - Connection string parsing exists in `connection.rs`
+  - Reader implementation: Not yet available
+
+**Current Status**: Only DuckDB reader is fully implemented and production-ready.
 
 ---
 
@@ -709,6 +844,7 @@ for layer in &spec.layers {
 
 **Additional Endpoints**:
 
+- `GET /` - Root endpoint (returns API information and status)
 - `POST /api/v1/parse` - Parse query and return AST (debugging)
 - `GET /api/v1/health` - Health check
 - `GET /api/v1/version` - Version info
@@ -772,56 +908,166 @@ ggsql validate query.sql
 
 ---
 
-### 6. Test Application (`test-app/`)
+### 6. Jupyter Kernel (`ggsql-jupyter/`)
 
-**Responsibility**: Interactive web UI for testing ggSQL queries.
-
-**Technology Stack**:
-
-- React + TypeScript
-- Vega-Lite for rendering
-- shadcn/ui components
-- esbuild for bundling
-- Tailwind CSS for styling
-
-**Architecture**:
-
-```
-App.tsx
-├── QueryEditor.tsx          # SQL + VISUALISE editor
-├── ExampleQueries.tsx       # Pre-built example gallery
-├── VegaRenderer.tsx         # Vega-Lite chart rendering
-├── MetadataPanel.tsx        # Execution stats display
-└── services/api.ts          # REST API client
-```
+**Responsibility**: Jupyter kernel for executing ggSQL queries with rich inline visualizations.
 
 **Features**:
 
-- Live query editing with syntax highlighting
-- One-click example query loading
-- Real-time visualization rendering
-- Error display with type information
-- Execution metadata (rows, columns, timing)
+- Execute ggSQL queries directly in Jupyter notebooks
+- Rich Vega-Lite visualizations rendered inline
+- Persistent DuckDB session across cells
+- Pure SQL support with HTML table output
+- Interactive data exploration and visualization
 
-**Example Queries Included**:
+**Architecture**:
 
-1. **Regional Trends** - Multi-line chart with date scale and colored regions
-2. **Faceted Categories** - Category trends faceted by product category with colored regions
-3. **Product Revenue** - Bar chart showing total revenue by product with JOIN operations
+The Jupyter kernel implements the Jupyter messaging protocol to:
+1. Receive ggSQL query code from notebook cells
+2. Maintain a persistent in-memory DuckDB session
+3. Execute queries using the ggSQL engine
+4. Return Vega-Lite JSON for visualization cells
+5. Return HTML tables for pure SQL queries
 
-**Sample Data**: DuckDB in-memory database with:
+**Installation**:
 
-- `products` table (5 products)
-- `sales` table (1000+ transactions)
-- `employees` table (10 sales staff)
+```bash
+# Install from crates.io
+cargo install ggsql-jupyter
+ggsql-jupyter --install
+
+# Or build from source
+cargo build --release --package ggsql-jupyter
+./target/release/ggsql-jupyter --install
+```
 
 **Usage**:
 
-```bash
-cd test-app
-npm install
-npm run dev  # Starts on http://localhost:5173
+```sql
+-- Cell 1: Create data
+CREATE TABLE sales AS
+SELECT * FROM (VALUES
+    ('2024-01-01'::DATE, 100, 'North'),
+    ('2024-01-02'::DATE, 120, 'South')
+) AS t(date, revenue, region)
+
+-- Cell 2: Visualize
+SELECT * FROM sales
+VISUALISE AS PLOT
+WITH line USING x = date, y = revenue, color = region
+SCALE x USING type = 'date'
+LABEL title = 'Sales Trends'
 ```
+
+**Key Implementation Details**:
+
+- Uses Jupyter messaging protocol (ZMQ)
+- Supports `execute_request`, `kernel_info_request`, `shutdown_request`
+- Returns `display_data` messages with Vega-Lite MIME type
+- Maintains kernel state across cell executions
+
+---
+
+### 7. VS Code Extension (`ggsql-vscode/`)
+
+**Responsibility**: Syntax highlighting for ggSQL in Visual Studio Code.
+
+**Features**:
+
+- Complete syntax highlighting for ggSQL queries
+- SQL keyword support (SELECT, FROM, WHERE, JOIN, WITH, etc.)
+- ggSQL clause highlighting (VISUALISE, SCALE, COORD, FACET, LABEL, etc.)
+- Aesthetic highlighting (x, y, color, size, shape, etc.)
+- String and number literals
+- Comment support (`--` and `/* */`)
+- Bracket matching and auto-closing
+- `.gsql` file extension support
+
+**Installation**:
+
+```bash
+# Install from VSIX file
+code --install-extension ggsql-0.1.0.vsix
+
+# Or from source
+cd ggsql-vscode
+npm install -g @vscode/vsce
+vsce package
+code --install-extension ggsql-0.1.0.vsix
+```
+
+**Implementation**:
+
+- Uses TextMate grammar (`syntaxes/ggsql.tmLanguage.json`)
+- Tree-sitter syntax highlighting queries (`tree-sitter-ggsql/queries/highlights.scm`)
+- Language configuration for bracket matching and comments
+- File extension association (`.gsql`)
+
+**Syntax Scopes**:
+
+- `keyword.control.ggsql` - VISUALISE, WITH, SCALE, COORD, etc.
+- `keyword.other.sql` - SELECT, FROM, WHERE, etc.
+- `entity.name.function.geom.ggsql` - point, line, bar, etc.
+- `variable.parameter.aesthetic.ggsql` - x, y, color, size, etc.
+- `constant.language.scale-type.ggsql` - linear, log10, date, etc.
+
+---
+
+## Feature Flags and Build Configuration
+
+ggSQL uses Cargo feature flags to enable optional functionality and reduce binary size.
+
+### Available Features
+
+**Default features** (`default = ["duckdb", "sqlite", "vegalite"]`):
+- `duckdb` - DuckDB reader (fully implemented)
+- `sqlite` - SQLite reader (planned, not implemented)
+- `vegalite` - Vega-Lite writer (fully implemented)
+
+**Reader features**:
+- `duckdb` - Enable DuckDB database reader
+- `postgres` - Enable PostgreSQL reader (planned, not implemented)
+- `sqlite` - Enable SQLite reader (planned, not implemented)
+- `all-readers` - Enable all reader implementations
+
+**Writer features**:
+- `vegalite` - Enable Vega-Lite JSON writer (default)
+- `ggplot2` - Enable R/ggplot2 code generation (planned, not implemented)
+- `plotters` - Enable plotters-based rendering (planned, not implemented)
+- `all-writers` - Enable all writer implementations
+
+**API features**:
+- `rest-api` - Enable REST API server (`ggsql-rest` binary)
+  - Includes: `axum`, `tokio`, `tower-http`, `tracing`, `duckdb`, `vegalite`
+  - Required for building `ggsql-rest` server
+
+**Future features**:
+- `python` - Python bindings via PyO3 (planned)
+
+### Building with Custom Features
+
+```bash
+# Minimal build (library only, no default features)
+cargo build --no-default-features
+
+# With specific features
+cargo build --features "duckdb,vegalite"
+
+# REST API server
+cargo build --bin ggsql-rest --features rest-api
+
+# All features
+cargo build --all-features
+```
+
+### Feature Dependencies
+
+**Feature flag → Dependencies mapping**:
+- `duckdb` → `duckdb` crate
+- `postgres` → `postgres` crate (future)
+- `sqlite` → `rusqlite` crate (future)
+- `rest-api` → `axum`, `tokio`, `tower-http`, `tracing`, `tracing-subscriber`
+- `python` → `pyo3` crate (future)
 
 ---
 
@@ -856,9 +1102,9 @@ WITH <geom> USING <aesthetic> = <value>, ... [AS <name>]
 
 **Geom Types**:
 
-- **Basic**: `point`, `line`, `bar`, `area`, `tile`, `ribbon`
-- **Statistical**: `histogram`, `density`, `smooth`, `boxplot`
-- **Annotation**: `text`, `segment`, `hline`, `vline`
+- **Basic**: `point`, `line`, `path`, `bar`, `col`, `area`, `tile`, `polygon`, `ribbon`
+- **Statistical**: `histogram`, `density`, `smooth`, `boxplot`, `violin`
+- **Annotation**: `text`, `label`, `segment`, `arrow`, `hline`, `vline`, `abline`, `errorbar`
 
 **Common Aesthetics**:
 
@@ -894,10 +1140,10 @@ SCALE <aesthetic> USING
 
 **Scale Types**:
 
-- **Continuous**: `linear`, `log10`, `log2`, `sqrt`, `reverse`
+- **Continuous**: `linear`, `log10`, `log`, `log2`, `sqrt`, `reverse`
 - **Discrete**: `categorical`, `ordinal`
 - **Temporal**: `date`, `datetime`, `time`
-- **Color Palettes**: `viridis`, `plasma`, `magma`, `inferno`, `diverging`
+- **Color Palettes**: `viridis`, `plasma`, `magma`, `inferno`, `cividis`, `diverging`, `sequential`
 
 **Critical for Date Formatting**:
 
