@@ -4,7 +4,7 @@
 //! SELECT * FROM <source> when VISUALISE FROM is used.
 
 use crate::{GgsqlError, Result};
-use tree_sitter::{Parser, Node};
+use tree_sitter::{Node, Parser};
 
 /// Split a ggSQL query into SQL and visualization portions
 ///
@@ -29,10 +29,21 @@ pub fn split_query(query: &str) -> Result<(String, String)> {
 
     let root = tree.root_node();
 
-    // If there's no VISUALISE statement, treat entire query as SQL
-    // Note: We don't check for parse errors here because the SQL portion might have errors
-    // (complex SQL we don't fully parse), but we still want to extract VISUALISE statements
-    if root.children(&mut root.walk()).all(|n| n.kind() != "visualise_statement") {
+    // Check if tree-sitter found any VISUALISE statements
+    let has_visualise_statement = root
+        .children(&mut root.walk())
+        .any(|n| n.kind() == "visualise_statement");
+
+    // If there's no VISUALISE statement, check if query contains VISUALISE FROM
+    // This catches malformed queries like "CREATE TABLE x VISUALISE FROM x" (no semicolon)
+    if !has_visualise_statement {
+        let query_upper = query.to_uppercase();
+        if query_upper.contains("VISUALISE FROM") || query_upper.contains("VISUALIZE FROM") {
+            return Err(GgsqlError::ParseError(
+                "Error parsing VISUALISE statement. Did you forget a semicolon?".to_string(),
+            ));
+        }
+        // No VISUALISE at all - treat entire query as SQL
         return Ok((query.to_string(), String::new()));
     }
 
@@ -69,18 +80,9 @@ pub fn split_query(query: &str) -> Result<(String, String)> {
                     // No SQL yet - just add SELECT
                     modified_sql = format!("SELECT * FROM {}", from_identifier);
                 } else {
-                    // VISUALISE FROM can only be used after WITH statements
                     let trimmed = modified_sql.trim();
-                    if !trimmed.to_uppercase().starts_with("WITH") {
-                        return Err(GgsqlError::ParseError(
-                            "VISUALISE FROM can only be used standalone or after WITH statements. \
-                             For other SQL statements, use 'SELECT ... VISUALISE AS' instead.".to_string()
-                        ));
-                    }
-                    // WITH followed by SELECT - no semicolon needed (compound statement)
                     modified_sql = format!("{} SELECT * FROM {}", trimmed, from_identifier);
                 }
-                // Only inject once (first VISUALISE FROM found)
                 break;
             }
         }
@@ -169,25 +171,35 @@ mod tests {
     }
 
     #[test]
-    fn test_visualise_from_after_create_errors() {
-        let query = "CREATE TABLE x AS SELECT 1; WITH cte AS (SELECT * FROM x) VISUALISE FROM cte AS PLOT";
-        let result = split_query(query);
+    fn test_visualise_from_after_create() {
+        let query = "CREATE TABLE x AS SELECT 1; VISUALISE FROM x AS PLOT";
+        let (sql, viz) = split_query(query).unwrap();
 
-        // Should error - VISUALISE FROM cannot be used after CREATE
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("VISUALISE FROM can only be used standalone or after WITH"));
+        assert!(sql.contains("CREATE TABLE x AS SELECT 1;"));
+        assert!(sql.contains("SELECT * FROM x"));
+        assert!(viz.starts_with("VISUALISE FROM x"));
     }
 
     #[test]
-    fn test_visualise_from_after_insert_not_recognized() {
-        let query = "INSERT INTO x VALUES (1) VISUALISE FROM x AS PLOT";
-        let (sql, viz) = split_query(query).unwrap();
+    fn test_visualise_from_after_create_without_semicolon_errors() {
+        let query = "CREATE TABLE x AS SELECT 1 VISUALISE FROM x AS PLOT";
+        let result = split_query(query);
 
-        // Tree-sitter doesn't recognize VISUALISE after INSERT - it gets consumed
-        // as part of the INSERT statement. This is fine - the query is invalid anyway.
-        // The entire thing becomes SQL with no VIZ portion.
-        assert!(viz.is_empty());
-        assert!(sql.contains("INSERT"));
+        // Should error - tree-sitter doesn't recognize VISUALISE FROM without semicolon
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Error parsing VISUALISE statement"));
+    }
+
+    #[test]
+    fn test_visualise_from_after_insert_errors() {
+        let query = "INSERT INTO x VALUES (1) VISUALISE FROM x AS PLOT";
+        let result = split_query(query);
+
+        // Should error - tree-sitter doesn't recognize VISUALISE FROM after INSERT
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Error parsing VISUALISE statement"));
     }
 
     #[test]
@@ -212,7 +224,8 @@ mod tests {
 
     #[test]
     fn test_visualise_from_file_path_double_quotes() {
-        let query = r#"VISUALISE FROM "data/sales.parquet" AS PLOT WITH bar USING x = region, y = total"#;
+        let query =
+            r#"VISUALISE FROM "data/sales.parquet" AS PLOT WITH bar USING x = region, y = total"#;
         let (sql, viz) = split_query(query).unwrap();
 
         // Should inject SELECT * FROM "data/sales.parquet" with quotes preserved
