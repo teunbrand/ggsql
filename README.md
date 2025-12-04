@@ -300,10 +300,6 @@ Key grammar elements:
 - **Unused variable warnings**: Expected during development - these are stub implementations
 - **Tree-sitter scanner warnings**: The C scanner has some unused parameters - this is normal
 
-## License
-
-MIT OR Apache-2.0
-
 ## Links
 
 - **Specification**: [CLAUDE.md](CLAUDE.md) - Complete grammar and implementation guide
