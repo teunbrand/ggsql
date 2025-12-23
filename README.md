@@ -283,3 +283,11 @@ The extension uses a TextMate grammar that highlights:
 - Geometric objects (point, line, bar, area, etc.)
 - Aesthetics (x, y, color, size, shape, etc.)
 - Scale types (linear, log10, date, viridis, etc.)
+
+## CLI
+
+### Installation
+
+```bash
+cargo install --path src
+```
