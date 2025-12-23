@@ -9,7 +9,7 @@
 ggSQL allows you to write queries that combine SQL data retrieval with visualization specifications in a single, composable syntax.
 }
 \author{
-\strong{Maintainer}: George Stagg \email{george.stagg@posit.co}
+\strong{Maintainer}: George Stagg \email{george.stagg@posit.co} (\href{https://orcid.org/0009-0006-3173-9846}{ORCID})
 
 Authors:
 \itemize{
