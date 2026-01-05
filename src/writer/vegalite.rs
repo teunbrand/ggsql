@@ -2896,7 +2896,7 @@ mod tests {
 
         let writer = VegaLiteWriter::new();
 
-        let mut spec = VizSpec::new(VizType::Plot);
+        let mut spec = VizSpec::new();
         let layer = Layer::new(Geom::Line)
             .with_aesthetic("x".to_string(), AestheticValue::Column("date".to_string()))
             .with_aesthetic("y".to_string(), AestheticValue::Column("value".to_string()))
@@ -2923,7 +2923,7 @@ mod tests {
 
         let writer = VegaLiteWriter::new();
 
-        let mut spec = VizSpec::new(VizType::Plot);
+        let mut spec = VizSpec::new();
         let layer = Layer::new(Geom::Line)
             .with_aesthetic("x".to_string(), AestheticValue::Column("date".to_string()))
             .with_aesthetic("y".to_string(), AestheticValue::Column("value".to_string()))
@@ -2955,7 +2955,7 @@ mod tests {
 
         let writer = VegaLiteWriter::new();
 
-        let mut spec = VizSpec::new(VizType::Plot);
+        let mut spec = VizSpec::new();
         let layer = Layer::new(Geom::Line)
             .with_aesthetic("x".to_string(), AestheticValue::Column("date".to_string()))
             .with_aesthetic("y".to_string(), AestheticValue::Column("value".to_string()));
@@ -2978,7 +2978,7 @@ mod tests {
 
         let writer = VegaLiteWriter::new();
 
-        let mut spec = VizSpec::new(VizType::Plot);
+        let mut spec = VizSpec::new();
         let layer = Layer::new(Geom::Line)
             .with_aesthetic("x".to_string(), AestheticValue::Column("date".to_string()))
             .with_aesthetic("y".to_string(), AestheticValue::Column("value".to_string()))
