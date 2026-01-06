@@ -711,7 +711,6 @@ DRAW line PARTITION BY category
 
 (query
   (visualise_statement
-    (viz_type)
     (viz_clause
       (draw_clause
         (geom_type)
@@ -741,7 +740,6 @@ DRAW line PARTITION BY category, region
 
 (query
   (visualise_statement
-    (viz_type)
     (viz_clause
       (draw_clause
         (geom_type)
@@ -772,7 +770,6 @@ DRAW line SETTING opacity TO 0.5 PARTITION BY category FILTER year > 2020
 
 (query
   (visualise_statement
-    (viz_type)
     (viz_clause
       (draw_clause
         (geom_type)
