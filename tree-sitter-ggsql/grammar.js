@@ -642,7 +642,7 @@ module.exports = grammar({
 
     label_assignment: $ => seq(
       $.label_type,
-      '=',
+      '=>',
       $.string
     ),
 

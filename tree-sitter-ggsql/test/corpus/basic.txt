@@ -438,7 +438,7 @@ Plot with labels
 
 VISUALISE x, y
 DRAW point
-LABEL title = 'My Plot', x = 'X Axis', y = 'Y Axis'
+LABEL title => 'My Plot', x => 'X Axis', y => 'Y Axis'
 
 --------------------------------------------------------------------------------
 

@@ -1671,7 +1671,7 @@ mod tests {
             visualise
             draw point MAPPING x AS x, y AS y
             coord cartesian setting xlim => [0, 100]
-            label title = 'Test Chart'
+            label title => 'Test Chart'
         "#;
 
         let result = parse_test_query(query);
