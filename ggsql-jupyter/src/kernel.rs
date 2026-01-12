@@ -152,6 +152,7 @@ impl KernelServer {
         match msg_type.as_str() {
             "kernel_info_request" => self.send_kernel_info(&jupyter_msg, &identities).await?,
             "execute_request" => self.execute(&jupyter_msg, &identities).await?,
+            "is_complete_request" => self.is_complete(&jupyter_msg, &identities).await?,
             _ => {
                 tracing::warn!("Unhandled message type: {}", msg_type);
             }
@@ -252,7 +253,11 @@ impl KernelServer {
                 "mimetype": "text/x-ggsql",
                 "file_extension": ".ggsql",
                 "pygments_lexer": "sql",
-                "codemirror_mode": "sql"
+                "codemirror_mode": "sql",
+                "positron": {
+                    "input_prompt": "ggSQL> ",
+                    "continuation_prompt": "... "
+                }
             },
             "banner": format!("ggSQL Jupyter Kernel v{}\nSQL with declarative visualization", env!("CARGO_PKG_VERSION")),
             "help_links": []
@@ -359,6 +364,44 @@ impl KernelServer {
         // Send status: idle
         self.send_status("idle", parent).await?;
 
+        Ok(())
+    }
+
+    /// Handle is_complete_request - check if code is a complete statement
+    async fn is_complete(&mut self, parent: &JupyterMessage, identities: &[Vec<u8>]) -> Result<()> {
+        let content = &parent.content;
+        let code = content["code"].as_str().unwrap_or("");
+
+        tracing::debug!("Checking if code is complete ({} chars)", code.len());
+
+        // Send status: busy
+        self.send_status("busy", parent).await?;
+
+        // Determine if code is complete
+        let status = if code.trim().is_empty() {
+            "incomplete" // Empty code needs more input
+        } else if is_code_complete(code) {
+            "complete"
+        } else {
+            "incomplete"
+        };
+
+        tracing::debug!("Code completeness: {}", status);
+
+        // Send is_complete_reply
+        self.send_shell_reply(
+            "is_complete_reply",
+            json!({
+                "status": status,
+                "indent": ""
+            }),
+            parent,
+            identities,
+        )
+        .await?;
+
+        // Send status: idle
+        self.send_status("idle", parent).await?;
         Ok(())
     }
 
@@ -565,4 +608,46 @@ impl KernelServer {
 
         hex::encode(mac.finalize().into_bytes())
     }
+}
+
+/// Check if ggSQL code is complete (balanced brackets, not in a string)
+fn is_code_complete(code: &str) -> bool {
+    let trimmed = code.trim();
+
+    // Empty or whitespace-only is incomplete
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Check for balanced parentheses, brackets, and braces
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    let mut brace_depth = 0i32;
+    let mut in_string = false;
+    let mut string_char = ' ';
+
+    for c in trimmed.chars() {
+        if in_string {
+            if c == string_char {
+                in_string = false;
+            }
+        } else {
+            match c {
+                '\'' | '"' => {
+                    in_string = true;
+                    string_char = c;
+                }
+                '(' => paren_depth += 1,
+                ')' => paren_depth -= 1,
+                '[' => bracket_depth += 1,
+                ']' => bracket_depth -= 1,
+                '{' => brace_depth += 1,
+                '}' => brace_depth -= 1,
+                _ => {}
+            }
+        }
+    }
+
+    // Code is complete if all brackets are balanced and we're not in a string
+    !in_string && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
 }
