@@ -981,6 +981,9 @@ impl VegaLiteWriter {
 
 impl Writer for VegaLiteWriter {
     fn write(&self, spec: &VizSpec, data: &HashMap<String, DataFrame>) -> Result<String> {
+        // Validate spec before processing
+        self.validate(spec)?;
+
         // Determine which dataset key each layer should use
         // A layer uses __layer_{idx}__ if:
         // - It has an explicit source (FROM clause), OR
