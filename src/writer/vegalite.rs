@@ -1473,12 +1473,22 @@ mod tests {
             let mut spec = VizSpec::new();
             let layer = Layer::new(geom.clone())
                 .with_aesthetic("x".to_string(), AestheticValue::Column("x".to_string()))
-                .with_aesthetic("y".to_string(), AestheticValue::Column("y".to_string()));
+                .with_aesthetic("y".to_string(), AestheticValue::Column("y".to_string()))
+                .with_aesthetic(
+                    "ymin".to_string(),
+                    AestheticValue::Column("ymin".to_string()),
+                )
+                .with_aesthetic(
+                    "ymax".to_string(),
+                    AestheticValue::Column("ymax".to_string()),
+                );
             spec.layers.push(layer);
 
             let df = df! {
                 "x" => &[1, 2, 3],
                 "y" => &[4, 5, 6],
+                "ymin" => &[3, 4, 5],
+                "ymax" => &[5, 6, 7],
             }
             .unwrap();
 
