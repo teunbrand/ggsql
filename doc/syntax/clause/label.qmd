@@ -1,4 +1,3 @@
 ---
 title: "Define different titles with `LABEL`"
-sidebar: syntax
 ---
