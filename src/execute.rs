@@ -4,7 +4,7 @@
 //! handling both global SQL and layer-specific data sources.
 
 use crate::parser::ast::{AestheticValue, GlobalMapping, GlobalMappingItem, Layer, LiteralValue};
-use crate::{ggsqlError, parser, DataFrame, LayerSource, Result, VizSpec};
+use crate::{parser, DataFrame, GgsqlError, LayerSource, Result, VizSpec};
 use std::collections::{HashMap, HashSet};
 use tree_sitter::{Node, Parser};
 
@@ -242,7 +242,7 @@ where
         );
 
         execute_sql(&create_sql).map_err(|e| {
-            ggsqlError::ReaderError(format!("Failed to materialize CTE '{}': {}", cte.name, e))
+            GgsqlError::ReaderError(format!("Failed to materialize CTE '{}': {}", cte.name, e))
         })?;
 
         materialized.insert(cte.name.clone());
@@ -360,7 +360,7 @@ fn build_layer_query(
             // No source - validate and use global if filter, order_by or constants present
             if filter.is_some() || order_by.is_some() || !constants.is_empty() {
                 if !has_global {
-                    return Err(ggsqlError::ValidationError(format!(
+                    return Err(GgsqlError::ValidationError(format!(
                         "Layer {} has a FILTER, ORDER BY, or constants but no data source. Either provide a SQL query or use MAPPING FROM.",
                         layer_idx + 1
                     )));
@@ -490,14 +490,14 @@ where
     let mut specs = parser::parse_query(query)?;
 
     if specs.is_empty() {
-        return Err(ggsqlError::ValidationError(
+        return Err(GgsqlError::ValidationError(
             "No visualization specifications found".to_string(),
         ));
     }
 
     // Check if we have any visualization content
     if viz_part.trim().is_empty() {
-        return Err(ggsqlError::ValidationError(
+        return Err(GgsqlError::ValidationError(
             "The visualization portion is empty".to_string(),
         ));
     }
@@ -638,7 +638,7 @@ where
             &constants,
         )? {
             let df = execute_query(&layer_query).map_err(|e| {
-                ggsqlError::ReaderError(format!(
+                GgsqlError::ReaderError(format!(
                     "Failed to fetch data for layer {}: {}",
                     idx + 1,
                     e
@@ -651,7 +651,7 @@ where
 
     // Validate we have some data
     if data_map.is_empty() {
-        return Err(ggsqlError::ValidationError(
+        return Err(GgsqlError::ValidationError(
             "No data sources found. Either provide a SQL query or use MAPPING FROM in layers."
                 .to_string(),
         ));
@@ -663,7 +663,7 @@ where
         .iter()
         .any(|l| l.source.is_none() && l.filter.is_none());
     if has_layer_without_source && !data_map.contains_key("__global__") {
-        return Err(ggsqlError::ValidationError(
+        return Err(GgsqlError::ValidationError(
             "Some layers use global data but no SQL query was provided.".to_string(),
         ));
     }
@@ -672,7 +672,7 @@ where
     let resolve_df = data_map
         .get("__global__")
         .or_else(|| data_map.values().next())
-        .ok_or_else(|| ggsqlError::InternalError("No data available".to_string()))?;
+        .ok_or_else(|| GgsqlError::InternalError("No data available".to_string()))?;
 
     let column_names: Vec<&str> = resolve_df
         .get_column_names()
