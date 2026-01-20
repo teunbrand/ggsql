@@ -792,7 +792,13 @@ module.exports = grammar({
     ),
 
     // Basic tokens
-    identifier: $ => /[a-zA-Z_][a-zA-Z0-9_]*/,
+    bare_identifier: $ => token(/[a-zA-Z_][a-zA-Z0-9_]*/),
+    quoted_identifier: $ => token(seq('`', /[^`]+/, '`')),
+
+    identifier: $ => choice(
+      $.bare_identifier,
+      $.quoted_identifier
+    ),
 
     // Identifier for use in filter expressions - uses lower precedence so that
     // keywords like PARTITION and ORDER can take priority and end the filter
@@ -842,5 +848,5 @@ module.exports = grammar({
     $.comment,    // Comments
   ],
 
-  word: $ => $.identifier,
+  word: $ => $.bare_identifier,
 });
