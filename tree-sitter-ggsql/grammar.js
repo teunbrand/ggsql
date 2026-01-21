@@ -285,10 +285,14 @@ module.exports = grammar({
 
     // Namespaced identifier: matches "namespace:name" pattern
     // Examples: ggsql:penguins, ggsql:airquality
-    namespaced_identifier: $ => token(choice(
-      /[a-zA-Z_][a-zA-Z0-9_]*:[a-zA-Z_][a-zA-Z0-9_]*/,
-      seq('`', /[a-zA-Z_][a-zA-Z0-9_]*:[a-zA-Z_][a-zA-Z0-9_]*/, '`')
-    )),
+    namespaced_identifier: $ => {
+      const pattern = /[a-zA-Z_][a-zA-Z0-9_]*:[a-zA-Z_][a-zA-Z0-9_]*/;
+      return token(choice(
+        pattern,
+        seq('`', pattern, '`'),
+        seq('"', pattern, '"')
+      ));
+    },
 
     window_specification: $ => seq(
       '(',
@@ -333,7 +337,7 @@ module.exports = grammar({
     ),
 
     // Dotted identifier (for catalog.schema.table)
-    qualified_name: $ => prec.left(seq(
+    qualified_name: $ => prec.right(seq(
       $.identifier,
       repeat(seq('.', $.identifier))
     )),
@@ -796,7 +800,10 @@ module.exports = grammar({
 
     // Basic tokens
     bare_identifier: $ => token(/[a-zA-Z_][a-zA-Z0-9_]*/),
-    quoted_identifier: $ => token(seq('`', /[^`]+/, '`')),
+    quoted_identifier: $ => token(choice(
+      seq('`', /[^`]+/, '`'),
+      seq('"', /[^"]+/, '"')
+    )),
 
     identifier: $ => choice(
       $.bare_identifier,
@@ -816,10 +823,7 @@ module.exports = grammar({
       )
     )),
 
-    string: $ => choice(
-      seq("'", repeat(choice(/[^'\\]/, seq('\\', /.*/))), "'"),
-      seq('"', repeat(choice(/[^"\\]/, seq('\\', /.*/))), '"')
-    ),
+    string: $ => seq("'", repeat(choice(/[^'\\]/, seq('\\', /.*/))), "'"),
 
     boolean: $ => choice('true', 'false'),
 

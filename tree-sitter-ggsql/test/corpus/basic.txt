@@ -708,7 +708,7 @@ Literal value in MAPPING
 ================================================================================
 
 VISUALISE x, y
-DRAW point MAPPING "blue" AS color
+DRAW point MAPPING 'blue' AS color
 
 --------------------------------------------------------------------------------
 
@@ -1998,3 +1998,106 @@ DRAW point MAPPING x AS x FROM ggsql:penguins
                       (bare_identifier))))
                 aesthetic: (aesthetic_name))))
           layer_source: (namespaced_identifier))))))
+
+================================================================================
+Quoting identifiers with "
+================================================================================
+
+SELECT "foo.bar" FROM "baz"."bix"
+
+--------------------------------------------------------------------------------
+
+(query
+  (sql_portion
+    (sql_statement
+      (select_statement
+        (select_body
+          (identifier
+            (quoted_identifier))
+          (from_clause
+            (table_ref
+              table: (qualified_name
+                (identifier
+                  (quoted_identifier))
+                (identifier
+                  (quoted_identifier))))))))))
+
+================================================================================
+Quoting identifiers with `
+================================================================================
+
+SELECT `foo.bar` FROM `baz`.`bix`
+
+--------------------------------------------------------------------------------
+
+(query
+  (sql_portion
+    (sql_statement
+      (select_statement
+        (select_body
+          (identifier
+            (quoted_identifier))
+          (from_clause
+            (table_ref
+              table: (qualified_name
+                (identifier
+                  (quoted_identifier))
+                (identifier
+                  (quoted_identifier))))))))))
+
+================================================================================
+SELECT FROM with an unquoted data source
+================================================================================
+
+SELECT * FROM foo.bar
+
+--------------------------------------------------------------------------------
+
+(query
+  (sql_portion
+    (sql_statement
+      (select_statement
+        (select_body
+          (from_clause
+            (table_ref
+              (qualified_name
+                (identifier
+                  (bare_identifier))
+                (identifier
+                  (bare_identifier))))))))))
+
+================================================================================
+SELECT FROM with a ' quoted data source
+================================================================================
+
+SELECT * FROM 'data.csv'
+
+--------------------------------------------------------------------------------
+
+(query
+  (sql_portion
+    (sql_statement
+      (select_statement
+        (select_body
+          (from_clause
+            (table_ref
+              (string))))))))
+
+================================================================================
+SELECT FROM with a " quoted data source
+================================================================================
+
+SELECT * FROM "data.csv"
+
+--------------------------------------------------------------------------------
+
+(query
+  (sql_portion
+    (sql_statement
+      (select_statement
+        (select_body
+          (from_clause
+            (table_ref
+              (qualified_name
+                (identifier
+                  (quoted_identifier))))))))))
