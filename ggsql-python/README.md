@@ -102,7 +102,7 @@ Split a ggSQL query into SQL and VISUALISE portions.
 Render a DataFrame with a VISUALISE specification.
 
 **Parameters:**
-- `df`: A `polars.DataFrame` or `polars.LazyFrame` (LazyFrames are collected automatically)
+- `df`: Any narwhals-compatible DataFrame (polars, pandas, etc.). LazyFrames are collected automatically.
 - `viz`: The VISUALISE specification string
 - `writer`: Output format, currently only `"vegalite"` is supported
 
@@ -149,7 +149,7 @@ pytest tests/ -v
 
 - Python >= 3.10
 - polars >= 1.0
-- pyarrow >= 12 (required for Arrow FFI)
+- narwhals >= 2.15
 
 ## License
 
