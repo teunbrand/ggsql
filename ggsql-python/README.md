@@ -58,7 +58,7 @@ sql, viz = ggsql.split_query("""
 df = duckdb.sql(sql).pl()
 
 # Render DataFrame + VISUALISE spec to Altair chart
-chart = ggsql.render(df, viz)
+chart = ggsql.render_altair(df, viz)
 
 # Display or save the chart
 chart.display()  # In Jupyter
@@ -67,22 +67,22 @@ chart.save("chart.html")  # Save to file
 
 ### Mapping styles
 
-The `render()` function supports various mapping styles:
+The `render_altair()` function supports various mapping styles:
 
 ```python
 df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30], "category": ["A", "B", "A"]})
 
 # Explicit mapping
-ggsql.render(df, "VISUALISE x AS x, y AS y DRAW point")
+ggsql.render_altair(df, "VISUALISE x AS x, y AS y DRAW point")
 
 # Implicit mapping (column name = aesthetic name)
-ggsql.render(df, "VISUALISE x, y DRAW point")
+ggsql.render_altair(df, "VISUALISE x, y DRAW point")
 
 # Wildcard mapping (map all matching columns)
-ggsql.render(df, "VISUALISE * DRAW point")
+ggsql.render_altair(df, "VISUALISE * DRAW point")
 
 # With color encoding
-ggsql.render(df, "VISUALISE x, y, category AS color DRAW point")
+ggsql.render_altair(df, "VISUALISE x, y, category AS color DRAW point")
 ```
 
 ## API
@@ -100,14 +100,14 @@ Split a ggSQL query into SQL and VISUALISE portions.
 **Raises:**
 - `ValueError`: If the query cannot be parsed
 
-### `render(df, viz, *, writer="vegalite") -> altair.Chart`
+### `render_altair(df, viz, **kwargs) -> altair.Chart`
 
-Render a DataFrame with a VISUALISE specification.
+Render a DataFrame with a VISUALISE specification to an Altair chart.
 
 **Parameters:**
 - `df`: Any narwhals-compatible DataFrame (polars, pandas, etc.). LazyFrames are collected automatically.
 - `viz`: The VISUALISE specification string
-- `writer`: Output format, currently only `"vegalite"` is supported
+- `**kwargs`: Additional keyword arguments passed to `altair.Chart.from_json()`. Common options include `validate=False` to skip schema validation.
 
 **Returns:**
 - An `altair.Chart` object that can be displayed, saved, or further customized
