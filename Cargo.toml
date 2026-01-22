@@ -5,6 +5,13 @@ members = [
     "ggsql-jupyter",
     "ggsql-python"
 ]
+# ggsql-python is excluded from default builds because it's a PyO3 extension
+# that requires Python dev headers. Build it separately with maturin.
+default-members = [
+    "tree-sitter-ggsql",
+    "src",
+    "ggsql-jupyter"
+]
 resolver = "2"
 
 [workspace.package]
