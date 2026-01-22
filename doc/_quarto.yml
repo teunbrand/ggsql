@@ -21,7 +21,8 @@ website:
     content: "ggsql is still in early development and all functionality is subject to change"
     type: primary
     position: below-navbar
-  twitter-card: true
+  twitter-card:
+    card-style: summary
   open-graph: true
   search: true
   navbar:
