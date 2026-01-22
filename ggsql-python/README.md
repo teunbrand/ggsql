@@ -148,7 +148,6 @@ pytest tests/ -v
 - altair >= 5.0
 - narwhals >= 2.15
 - polars >= 1.0
-- pyarrow >= 14.0
 
 ## License
 

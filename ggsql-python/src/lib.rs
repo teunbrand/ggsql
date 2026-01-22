@@ -3,16 +3,16 @@
 #![allow(clippy::useless_conversion)]
 
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
+use pyo3::types::PyBytes;
 use std::collections::{HashMap, HashSet};
+use std::io::Cursor;
 
 use ggsql::naming::GLOBAL_DATA_KEY;
 use ggsql::parser::parse_query;
 use ggsql::writer::{VegaLiteWriter, Writer};
 use ggsql::AestheticValue;
 
-// Re-export polars from pyo3_polars to ensure type compatibility
-use polars::prelude::DataFrame;
+use polars::prelude::{DataFrame, IpcReader, SerReader};
 
 #[pyfunction]
 fn split_query(query: &str) -> PyResult<(String, String)> {
@@ -21,10 +21,14 @@ fn split_query(query: &str) -> PyResult<(String, String)> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (py_df, viz, *, writer = "vegalite"))]
-fn render(py_df: PyDataFrame, viz: &str, writer: &str) -> PyResult<String> {
-    // Convert PyDataFrame to Polars DataFrame (pyo3-polars' bundled polars)
-    let df: DataFrame = py_df.into();
+#[pyo3(signature = (ipc_bytes, viz, *, writer = "vegalite"))]
+fn render(ipc_bytes: &Bound<'_, PyBytes>, viz: &str, writer: &str) -> PyResult<String> {
+    // Read DataFrame from IPC bytes
+    let bytes = ipc_bytes.as_bytes();
+    let cursor = Cursor::new(bytes);
+    let df: DataFrame = IpcReader::new(cursor)
+        .finish()
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to read IPC data: {}", e)))?;
 
     // Parse the visualization spec
     // The viz string should be a complete VISUALISE statement
@@ -73,8 +77,6 @@ fn render(py_df: PyDataFrame, viz: &str, writer: &str) -> PyResult<String> {
     spec.compute_aesthetic_labels();
 
     // Create data map with the DataFrame as global data
-    // Note: We use pyo3-polars' bundled polars DataFrame, which may differ from ggsql's
-    // The VegaLiteWriter only needs DataFrame for serialization to JSON
     let mut data_map: HashMap<String, DataFrame> = HashMap::new();
     data_map.insert(GLOBAL_DATA_KEY.to_string(), df);
 

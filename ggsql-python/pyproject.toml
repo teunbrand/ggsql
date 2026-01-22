@@ -18,7 +18,6 @@ dependencies = [
     "altair>=5.0",
     "narwhals>=2.15.0",
     "polars>=1.0",
-    "pyarrow>=14.0",
 ]
 
 [project.optional-dependencies]

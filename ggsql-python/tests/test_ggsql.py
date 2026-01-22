@@ -87,6 +87,69 @@ class TestRenderAltairReturnType:
         assert len(json_str) > 0
 
 
+class TestRenderAltairChartTypeDetection:
+    """Tests for correct Altair chart type detection based on spec structure."""
+
+    def test_simple_chart_returns_layer_chart(self):
+        """Simple DRAW specs produce LayerChart (ggsql always wraps in layer)."""
+        df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
+        chart = ggsql.render_altair(df, "VISUALISE x, y DRAW point")
+        # ggsql wraps all charts in a layer
+        assert isinstance(chart, altair.LayerChart)
+
+    def test_layered_chart_can_round_trip(self):
+        """LayerChart can be converted to dict and back."""
+        df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
+        chart = ggsql.render_altair(df, "VISUALISE x, y DRAW point")
+
+        # Convert to dict and back
+        spec = chart.to_dict()
+        assert "layer" in spec
+
+        # Should be able to recreate from dict
+        recreated = altair.LayerChart.from_dict(spec)
+        assert isinstance(recreated, altair.LayerChart)
+
+    def test_faceted_chart_returns_facet_chart(self):
+        """FACET WRAP specs produce FacetChart."""
+        df = pl.DataFrame({
+            "x": [1, 2, 3, 4, 5, 6],
+            "y": [10, 20, 30, 40, 50, 60],
+            "group": ["A", "A", "A", "B", "B", "B"],
+        })
+        # Need validate=False because ggsql produces v6 specs
+        chart = ggsql.render_altair(df, "VISUALISE x, y FACET WRAP group DRAW point", validate=False)
+        assert isinstance(chart, altair.FacetChart)
+
+    def test_faceted_chart_can_round_trip(self):
+        """FacetChart can be converted to dict and back."""
+        df = pl.DataFrame({
+            "x": [1, 2, 3, 4, 5, 6],
+            "y": [10, 20, 30, 40, 50, 60],
+            "group": ["A", "A", "A", "B", "B", "B"],
+        })
+        chart = ggsql.render_altair(df, "VISUALISE x, y FACET WRAP group DRAW point", validate=False)
+
+        # Convert to dict (skip validation for ggsql specs)
+        spec = chart.to_dict(validate=False)
+        assert "facet" in spec or "spec" in spec
+
+        # Should be able to recreate from dict (with validation disabled)
+        recreated = altair.FacetChart.from_dict(spec, validate=False)
+        assert isinstance(recreated, altair.FacetChart)
+
+    def test_chart_with_color_encoding(self):
+        """Charts with color encoding still return correct type."""
+        df = pl.DataFrame({
+            "x": [1, 2, 3, 4],
+            "y": [10, 20, 30, 40],
+            "category": ["A", "B", "A", "B"],
+        })
+        chart = ggsql.render_altair(df, "VISUALISE x, y, category AS color DRAW point")
+        # Should still be a LayerChart (ggsql wraps in layer)
+        assert isinstance(chart, altair.LayerChart)
+
+
 class TestRenderAltairErrorHandling:
     """Tests for error handling in render_altair()."""
 
