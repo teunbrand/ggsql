@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Literal
+from typing import Literal, overload
 
+import altair
 import narwhals as nw
 from narwhals.typing import IntoFrame
 
@@ -10,12 +11,21 @@ __all__ = ["split_query", "render"]
 __version__ = "0.1.0"
 
 
+@overload
+def render(
+    df: IntoFrame,
+    viz: str,
+    *,
+    writer: Literal["vegalite"] = ...,
+) -> altair.Chart: ...
+
+
 def render(
     df: IntoFrame,
     viz: str,
     *,
     writer: Literal["vegalite"] = "vegalite",
-) -> str:
+) -> altair.Chart:
     """Render a DataFrame with a VISUALISE spec.
 
     Parameters
@@ -30,8 +40,8 @@ def render(
 
     Returns
     -------
-    str
-        Vega-Lite JSON specification.
+    altair.Chart
+        An Altair chart object.
     """
 
     df = nw.from_native(df, pass_through=True)
@@ -45,4 +55,6 @@ def render(
     # Should be safe as long as we take polars dependency
     pl_df = df.to_polars()
 
-    return _render(pl_df, viz, writer=writer)
+    vegalite_json = _render(pl_df, viz, writer=writer)
+
+    return altair.Chart.from_json(vegalite_json)

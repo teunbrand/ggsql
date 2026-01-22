@@ -38,45 +38,13 @@ jobs:
           args: --release
           sccache: true
 
-      - name: Install wheel and test
+      - name: Install wheel and test dependencies
         shell: bash
-        run: |
-          pip install --find-links target/wheels/ ggsql[test]
-          pytest ggsql-python/tests/test_ggsql.py -v
+        run: pip install --find-links target/wheels/ ggsql[test]
 
-  e2e-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ggsql-python
-          shared-key: ubuntu-latest-python
-
-      - name: Build wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: ggsql-python
-          command: build
-          args: --release
-          sccache: true
-
-      - name: Install wheel and E2E dependencies
+      - name: Run tests
         shell: bash
-        run: pip install --find-links target/wheels/ ggsql[test,e2e]
-
-      - name: Run E2E tests
-        shell: bash
-        run: pytest ggsql-python/tests/test_altair_e2e.py -v
+        run: pytest ggsql-python/tests/ -v
 
   lint:
     runs-on: ubuntu-latest

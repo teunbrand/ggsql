@@ -2,7 +2,7 @@
 
 Python bindings for [ggsql](https://github.com/georgestagg/ggsql), a SQL extension for declarative data visualization.
 
-This package provides a thin wrapper around the Rust `ggsql` crate, enabling Python users to render Vega-Lite visualizations from polars DataFrames using ggsql's VISUALISE syntax.
+This package provides a thin wrapper around the Rust `ggsql` crate, enabling Python users to render Altair charts from DataFrames using ggsql's VISUALISE syntax.
 
 ## Installation
 
@@ -43,7 +43,7 @@ pip install target/wheels/ggsql-*.whl
 
 ```python
 import ggsql
-import polars as pl
+import duckdb
 
 # Split a ggSQL query into SQL and VISUALISE portions
 sql, viz = ggsql.split_query("""
@@ -54,12 +54,15 @@ sql, viz = ggsql.split_query("""
     LABEL title => 'Sales Trends'
 """)
 
-# Execute SQL with your preferred tool
-import duckdb
+# Execute SQL with DuckDB
 df = duckdb.sql(sql).pl()
 
-# Render DataFrame + VISUALISE spec to Vega-Lite JSON
-vegalite_json = ggsql.render(df, viz)
+# Render DataFrame + VISUALISE spec to Altair chart
+chart = ggsql.render(df, viz)
+
+# Display or save the chart
+chart.display()  # In Jupyter
+chart.save("chart.html")  # Save to file
 ```
 
 ### Mapping styles
@@ -97,7 +100,7 @@ Split a ggSQL query into SQL and VISUALISE portions.
 **Raises:**
 - `ValueError`: If the query cannot be parsed
 
-### `render(df, viz, *, writer="vegalite") -> str`
+### `render(df, viz, *, writer="vegalite") -> altair.Chart`
 
 Render a DataFrame with a VISUALISE specification.
 
@@ -107,7 +110,7 @@ Render a DataFrame with a VISUALISE specification.
 - `writer`: Output format, currently only `"vegalite"` is supported
 
 **Returns:**
-- JSON string containing the Vega-Lite specification
+- An `altair.Chart` object that can be displayed, saved, or further customized
 
 **Raises:**
 - `ValueError`: If the spec cannot be parsed or rendered
@@ -133,13 +136,7 @@ maturin develop
 
 ```bash
 # Install test dependencies
-pip install pytest altair
-
-# Run unit tests
-pytest tests/test_ggsql.py -v
-
-# Run E2E tests with altair
-pytest tests/test_altair_e2e.py -v
+pip install pytest
 
 # Run all tests
 pytest tests/ -v
@@ -148,8 +145,10 @@ pytest tests/ -v
 ## Requirements
 
 - Python >= 3.10
-- polars >= 1.0
+- altair >= 5.0
 - narwhals >= 2.15
+- polars >= 1.0
+- pyarrow >= 14.0
 
 ## License
 

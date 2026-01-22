@@ -1,6 +1,6 @@
-import json
 import pytest
 import polars as pl
+import altair
 import ggsql
 
 
@@ -30,23 +30,26 @@ def test_split_query_visualise_from():
 
 def test_render_simple():
     df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-    output = ggsql.render(df, "VISUALISE x, y DRAW point")
-    spec = json.loads(output)
+    chart = ggsql.render(df, "VISUALISE x, y DRAW point")
+    assert isinstance(chart, altair.TopLevelMixin)
+    spec = chart.to_dict()
     assert spec["$schema"].startswith("https://vega.github.io/schema/vega-lite")
     assert "datasets" in spec
 
 
 def test_render_lazyframe():
     lf = pl.LazyFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-    output = ggsql.render(lf, "VISUALISE x, y DRAW point")
-    spec = json.loads(output)
+    chart = ggsql.render(lf, "VISUALISE x, y DRAW point")
+    assert isinstance(chart, altair.TopLevelMixin)
+    spec = chart.to_dict()
     assert "layer" in spec or "mark" in spec
 
 
 def test_render_explicit_writer():
     df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-    output = ggsql.render(df, "VISUALISE x, y DRAW point", writer="vegalite")
-    spec = json.loads(output)
+    chart = ggsql.render(df, "VISUALISE x, y DRAW point", writer="vegalite")
+    assert isinstance(chart, altair.TopLevelMixin)
+    spec = chart.to_dict()
     assert "$schema" in spec
 
 
@@ -65,8 +68,9 @@ def test_render_unknown_writer_raises():
 def test_render_wildcard_mapping():
     """Test that VISUALISE * resolves column names."""
     df = pl.DataFrame({"x": [1, 2], "y": [10, 20]})
-    output = ggsql.render(df, "VISUALISE * DRAW point")
-    spec = json.loads(output)
+    chart = ggsql.render(df, "VISUALISE * DRAW point")
+    assert isinstance(chart, altair.TopLevelMixin)
+    spec = chart.to_dict()
     # Should have resolved x and y from DataFrame columns
     assert "data" in spec or "datasets" in spec
 
@@ -74,8 +78,8 @@ def test_render_wildcard_mapping():
 def test_render_implicit_mapping():
     """Test that VISUALISE x, y resolves to x AS x, y AS y."""
     df = pl.DataFrame({"x": [1, 2], "y": [10, 20]})
-    output = ggsql.render(df, "VISUALISE x, y DRAW point")
-    spec = json.loads(output)
+    chart = ggsql.render(df, "VISUALISE x, y DRAW point")
+    spec = chart.to_dict()
     encoding = spec.get("encoding", {})
     assert "x" in encoding or "layer" in spec
 
@@ -83,11 +87,11 @@ def test_render_implicit_mapping():
 def test_render_with_labels():
     """Test that LABEL clause produces axis titles."""
     df = pl.DataFrame({"date": [1, 2], "revenue": [100, 200]})
-    output = ggsql.render(
+    chart = ggsql.render(
         df,
         "VISUALISE date AS x, revenue AS y DRAW line LABEL title => 'Sales', x => 'Date'"
     )
-    spec = json.loads(output)
+    spec = chart.to_dict()
     assert spec.get("title") == "Sales"
 
 
@@ -113,15 +117,15 @@ def test_full_workflow():
     # Simulate SQL execution (in real usage, user would use DuckDB/etc)
     df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
 
-    # Render to Vega-Lite
-    output = ggsql.render(df, viz)
-    spec = json.loads(output)
+    # Render to Altair chart
+    chart = ggsql.render(df, viz)
+    assert isinstance(chart, altair.TopLevelMixin)
+    spec = chart.to_dict()
 
     # Verify structure
     assert spec["$schema"].startswith("https://vega.github.io/schema/vega-lite")
     assert spec["title"] == "Test Chart"
     assert "data" in spec or "datasets" in spec
-    assert len(spec.get("data", {}).get("values", [])) == 3 or "datasets" in spec
 
     # Should have 2 layers (line + point)
     assert "layer" in spec
@@ -135,8 +139,8 @@ def test_render_uses_correct_global_data_key():
     a hardcoded "__global__" which caused 'Missing data source' errors.
     """
     df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-    output = ggsql.render(df, "VISUALISE x, y DRAW point")
-    spec = json.loads(output)
+    chart = ggsql.render(df, "VISUALISE x, y DRAW point")
+    spec = chart.to_dict()
 
     # The datasets dict should use __ggsql_global__ as the key
     assert "datasets" in spec
@@ -157,8 +161,9 @@ def test_render_narwhals_dataframe():
     nw_df = nw.from_native(pl_df)
 
     # Render should accept narwhals DataFrame
-    output = ggsql.render(nw_df, "VISUALISE x, y DRAW point")
-    spec = json.loads(output)
+    chart = ggsql.render(nw_df, "VISUALISE x, y DRAW point")
+    assert isinstance(chart, altair.TopLevelMixin)
+    spec = chart.to_dict()
 
     assert "datasets" in spec
     assert "__ggsql_global__" in spec["datasets"]
@@ -172,8 +177,9 @@ def test_render_pandas_dataframe():
 
     pd_df = pd.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
 
-    output = ggsql.render(pd_df, "VISUALISE x, y DRAW point")
-    spec = json.loads(output)
+    chart = ggsql.render(pd_df, "VISUALISE x, y DRAW point")
+    assert isinstance(chart, altair.TopLevelMixin)
+    spec = chart.to_dict()
 
     assert "datasets" in spec
     assert "__ggsql_global__" in spec["datasets"]

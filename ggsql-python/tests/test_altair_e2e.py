@@ -1,53 +1,47 @@
 """End-to-end tests for altair integration.
 
-These tests verify that ggsql output can be loaded into altair
-and produces valid, renderable charts.
+These tests verify that ggsql output produces valid, renderable Altair charts.
 """
 
 import pytest
 import polars as pl
-
-altair = pytest.importorskip("altair", minversion="5.0")
+import altair
 
 import ggsql
 
 
 class TestAltairChartFromGgsql:
-    """Test that ggsql output can be loaded into altair charts."""
+    """Test that ggsql renders valid Altair charts."""
 
-    def test_point_chart_loads(self):
-        """Test that a simple point chart can be loaded into altair."""
+    def test_point_chart_renders(self):
+        """Test that a simple point chart renders correctly."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW point")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x, y DRAW point")
 
         assert chart is not None
         assert isinstance(chart, altair.TopLevelMixin)
 
-    def test_line_chart_loads(self):
-        """Test that a line chart can be loaded into altair."""
+    def test_line_chart_renders(self):
+        """Test that a line chart renders correctly."""
         df = pl.DataFrame({
             "date": ["2024-01-01", "2024-01-02", "2024-01-03"],
             "value": [100, 120, 110]
         })
-        vl_json = ggsql.render(df, "VISUALISE date AS x, value AS y DRAW line")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE date AS x, value AS y DRAW line")
 
         assert chart is not None
+        assert isinstance(chart, altair.TopLevelMixin)
 
-    def test_bar_chart_loads(self):
-        """Test that a bar chart can be loaded into altair."""
+    def test_bar_chart_renders(self):
+        """Test that a bar chart renders correctly."""
         df = pl.DataFrame({
             "category": ["A", "B", "C"],
             "count": [25, 40, 15]
         })
-        vl_json = ggsql.render(df, "VISUALISE category AS x, count AS y DRAW bar")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE category AS x, count AS y DRAW bar")
 
         assert chart is not None
+        assert isinstance(chart, altair.TopLevelMixin)
 
     def test_chart_with_color_encoding(self):
         """Test that color encoding works correctly."""
@@ -56,9 +50,7 @@ class TestAltairChartFromGgsql:
             "y": [10, 20, 30, 15, 25, 35],
             "group": ["A", "A", "A", "B", "B", "B"]
         })
-        vl_json = ggsql.render(df, "VISUALISE x, y, group AS color DRAW point")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x, y, group AS color DRAW point")
         spec = chart.to_dict()
 
         # ggsql uses layer structure - encoding is inside layer
@@ -67,12 +59,10 @@ class TestAltairChartFromGgsql:
         assert "encoding" in layer
         assert "color" in layer["encoding"]
 
-    def test_multi_layer_chart_loads(self):
-        """Test that multi-layer charts load correctly."""
+    def test_multi_layer_chart_renders(self):
+        """Test that multi-layer charts render correctly."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW line DRAW point")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x, y DRAW line DRAW point")
         spec = chart.to_dict()
 
         # Multi-layer charts should have a layer array
@@ -86,22 +76,19 @@ class TestAltairChartValidation:
     def test_schema_validation_passes(self):
         """Test that the output validates against Vega-Lite schema."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW point")
-
-        # from_json with validate=True (default) will raise if invalid
-        chart = altair.Chart.from_json(vl_json, validate=True)
+        # render returns an altair.Chart which is already validated
+        chart = ggsql.render(df, "VISUALISE x, y DRAW point")
 
         assert chart is not None
+        assert isinstance(chart, altair.TopLevelMixin)
 
     def test_chart_with_title_validates(self):
         """Test that charts with titles validate correctly."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(
+        chart = ggsql.render(
             df,
             "VISUALISE x, y DRAW point LABEL title => 'My Chart'"
         )
-
-        chart = altair.Chart.from_json(vl_json, validate=True)
         spec = chart.to_dict()
 
         assert spec.get("title") == "My Chart"
@@ -109,14 +96,13 @@ class TestAltairChartValidation:
     def test_chart_with_axis_labels_validates(self):
         """Test that charts with axis labels validate correctly."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(
+        chart = ggsql.render(
             df,
             "VISUALISE x, y DRAW point LABEL x => 'X Axis', y => 'Y Axis'"
         )
 
-        chart = altair.Chart.from_json(vl_json, validate=True)
-
         assert chart is not None
+        assert isinstance(chart, altair.TopLevelMixin)
 
 
 class TestAltairChartStructure:
@@ -139,9 +125,7 @@ class TestAltairChartStructure:
     def test_point_mark_type(self):
         """Test that point charts have correct mark type."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW point")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x, y DRAW point")
         spec = chart.to_dict()
 
         assert self._get_mark(spec) == "point"
@@ -149,9 +133,7 @@ class TestAltairChartStructure:
     def test_line_mark_type(self):
         """Test that line charts have correct mark type."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW line")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x, y DRAW line")
         spec = chart.to_dict()
 
         assert self._get_mark(spec) == "line"
@@ -159,9 +141,7 @@ class TestAltairChartStructure:
     def test_bar_mark_type(self):
         """Test that bar charts have correct mark type."""
         df = pl.DataFrame({"x": ["A", "B", "C"], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW bar")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x, y DRAW bar")
         spec = chart.to_dict()
 
         assert self._get_mark(spec) == "bar"
@@ -169,9 +149,7 @@ class TestAltairChartStructure:
     def test_encoding_fields_present(self):
         """Test that encoding fields are correctly set."""
         df = pl.DataFrame({"x_col": [1, 2, 3], "y_col": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x_col AS x, y_col AS y DRAW point")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x_col AS x, y_col AS y DRAW point")
         spec = chart.to_dict()
 
         # ggsql uses layer structure - encoding is inside layer
@@ -186,9 +164,7 @@ class TestAltairChartStructure:
     def test_data_embedded_in_spec(self):
         """Test that data is embedded in the spec."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW point")
-
-        chart = altair.Chart.from_json(vl_json)
+        chart = ggsql.render(df, "VISUALISE x, y DRAW point")
         spec = chart.to_dict()
 
         # Data should be in 'datasets' (ggsql style) or 'data'
@@ -202,9 +178,7 @@ class TestAltairRoundTrip:
     def test_to_dict_and_back(self):
         """Test that chart can be converted to dict and back."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW point")
-
-        chart1 = altair.Chart.from_json(vl_json)
+        chart1 = ggsql.render(df, "VISUALISE x, y DRAW point")
         spec_dict = chart1.to_dict()
         chart2 = altair.Chart.from_dict(spec_dict)
 
@@ -214,9 +188,7 @@ class TestAltairRoundTrip:
     def test_to_json_and_back(self):
         """Test that chart can be converted to JSON and back."""
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
-        vl_json = ggsql.render(df, "VISUALISE x, y DRAW point")
-
-        chart1 = altair.Chart.from_json(vl_json)
+        chart1 = ggsql.render(df, "VISUALISE x, y DRAW point")
         json_str = chart1.to_json()
         chart2 = altair.Chart.from_json(json_str)
 
