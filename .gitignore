@@ -24,6 +24,12 @@ Cargo.lock
 ehthumbs.db
 Thumbs.db
 
+# Tree-sitter generated files
+/tree-sitter-ggsql/src/parser.c
+/tree-sitter-ggsql/src/tree_sitter/
+/tree-sitter-ggsql/src/node-types.json
+/tree-sitter-ggsql/src/grammar.json
+
 # Node.js (for tree-sitter CLI)
 node_modules/
 npm-debug.log*
