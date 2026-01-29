@@ -3,9 +3,12 @@
 These tests focus on Python-specific logic:
 - DataFrame conversion via narwhals
 - Return type handling
+- Two-stage API (prepare -> render)
 
 Rust logic (parsing, Vega-Lite generation) is tested in the Rust test suite.
 """
+
+import json
 
 import pytest
 import polars as pl
@@ -14,20 +17,188 @@ import altair
 import ggsql
 
 
-class TestSplitQuery:
-    """Tests for split_query() function."""
+class TestValidate:
+    """Tests for validate() function."""
 
-    def test_splits_sql_and_visualise(self):
-        sql, viz = ggsql.split_query(
-            "SELECT x, y FROM data VISUALISE x, y DRAW point"
+    def test_valid_query_with_visualise(self):
+        validated = ggsql.validate(
+            "SELECT 1 AS x, 2 AS y VISUALISE DRAW point MAPPING x AS x, y AS y"
         )
-        assert "SELECT" in sql
-        assert "VISUALISE" in viz
+        assert validated.has_visual()
+        assert validated.valid()
+        assert "SELECT" in validated.sql()
+        assert "VISUALISE" in validated.visual()
+        assert len(validated.errors()) == 0
 
-    def test_no_visualise_returns_empty_viz(self):
-        sql, viz = ggsql.split_query("SELECT * FROM data")
-        assert sql == "SELECT * FROM data"
-        assert viz == ""
+    def test_valid_query_without_visualise(self):
+        validated = ggsql.validate("SELECT 1 AS x, 2 AS y")
+        assert not validated.has_visual()
+        assert validated.valid()
+        assert validated.sql() == "SELECT 1 AS x, 2 AS y"
+        assert validated.visual() == ""
+
+    def test_invalid_query_has_errors(self):
+        validated = ggsql.validate("SELECT 1 VISUALISE DRAW invalid_geom")
+        assert not validated.valid()
+        assert len(validated.errors()) > 0
+
+    def test_missing_required_aesthetic(self):
+        # Point requires x and y, only providing x
+        validated = ggsql.validate(
+            "SELECT 1 AS x, 2 AS y VISUALISE DRAW point MAPPING x AS x"
+        )
+        assert not validated.valid()
+        errors = validated.errors()
+        assert len(errors) > 0
+        assert any("y" in e["message"] for e in errors)
+
+
+class TestDuckDBReader:
+    """Tests for DuckDBReader class."""
+
+    def test_create_in_memory(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        assert reader is not None
+
+    def test_execute_simple_query(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        df = reader.execute("SELECT 1 AS x, 2 AS y")
+        assert isinstance(df, pl.DataFrame)
+        assert df.shape == (1, 2)
+        assert list(df.columns) == ["x", "y"]
+
+    def test_register_and_query(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
+        reader.register("my_data", df)
+
+        result = reader.execute("SELECT * FROM my_data WHERE x > 1")
+        assert isinstance(result, pl.DataFrame)
+        assert result.shape == (2, 2)
+
+    def test_supports_register(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        assert reader.supports_register() is True
+
+    def test_invalid_connection_string(self):
+        with pytest.raises(ValueError):
+            ggsql.DuckDBReader("invalid://connection")
+
+
+class TestVegaLiteWriter:
+    """Tests for VegaLiteWriter class."""
+
+    def test_create_writer(self):
+        writer = ggsql.VegaLiteWriter()
+        assert writer is not None
+
+
+class TestPrepare:
+    """Tests for prepare() function."""
+
+    def test_prepare_simple_query(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+        assert prepared is not None
+        assert prepared.layer_count() == 1
+
+    def test_prepare_with_registered_data(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
+        reader.register("data", df)
+
+        prepared = ggsql.prepare("SELECT * FROM data VISUALISE x, y DRAW point", reader)
+        assert prepared.metadata()["rows"] == 3
+
+    def test_prepare_metadata(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT * FROM (VALUES (1, 10), (2, 20), (3, 30)) AS t(x, y) "
+            "VISUALISE x, y DRAW point",
+            reader,
+        )
+
+        metadata = prepared.metadata()
+        assert metadata["rows"] == 3
+        assert "x" in metadata["columns"]
+        assert "y" in metadata["columns"]
+        assert metadata["layer_count"] == 1
+
+    def test_prepare_sql_accessor(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+        assert "SELECT" in prepared.sql()
+
+    def test_prepare_visual_accessor(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+        assert "VISUALISE" in prepared.visual()
+
+    def test_prepare_data_accessor(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+        data = prepared.data()
+        assert isinstance(data, pl.DataFrame)
+        assert data.shape == (1, 2)
+
+    def test_prepare_without_visualise_fails(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        with pytest.raises(ValueError):
+            ggsql.prepare("SELECT 1 AS x, 2 AS y", reader)
+
+
+class TestPreparedRender:
+    """Tests for Prepared.render() method."""
+
+    def test_render_to_vegalite(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+        writer = ggsql.VegaLiteWriter()
+
+        result = prepared.render(writer)
+        assert isinstance(result, str)
+
+        spec = json.loads(result)
+        assert "$schema" in spec
+        assert "vega-lite" in spec["$schema"]
+
+    def test_render_contains_data(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
+        reader.register("data", df)
+
+        prepared = ggsql.prepare("SELECT * FROM data VISUALISE x, y DRAW point", reader)
+        writer = ggsql.VegaLiteWriter()
+
+        result = prepared.render(writer)
+        spec = json.loads(result)
+        # Data should be in the spec (either inline or in datasets)
+        assert "data" in spec or "datasets" in spec
+
+    def test_render_multi_layer(self):
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT * FROM (VALUES (1, 10), (2, 20)) AS t(x, y) "
+            "VISUALISE "
+            "DRAW point MAPPING x AS x, y AS y "
+            "DRAW line MAPPING x AS x, y AS y",
+            reader,
+        )
+        writer = ggsql.VegaLiteWriter()
+
+        result = prepared.render(writer)
+        spec = json.loads(result)
+        assert "layer" in spec
 
 
 class TestRenderAltairDataFrameConversion:
@@ -112,23 +283,31 @@ class TestRenderAltairChartTypeDetection:
 
     def test_faceted_chart_returns_facet_chart(self):
         """FACET WRAP specs produce FacetChart."""
-        df = pl.DataFrame({
-            "x": [1, 2, 3, 4, 5, 6],
-            "y": [10, 20, 30, 40, 50, 60],
-            "group": ["A", "A", "A", "B", "B", "B"],
-        })
+        df = pl.DataFrame(
+            {
+                "x": [1, 2, 3, 4, 5, 6],
+                "y": [10, 20, 30, 40, 50, 60],
+                "group": ["A", "A", "A", "B", "B", "B"],
+            }
+        )
         # Need validate=False because ggsql produces v6 specs
-        chart = ggsql.render_altair(df, "VISUALISE x, y FACET WRAP group DRAW point", validate=False)
+        chart = ggsql.render_altair(
+            df, "VISUALISE x, y FACET WRAP group DRAW point", validate=False
+        )
         assert isinstance(chart, altair.FacetChart)
 
     def test_faceted_chart_can_round_trip(self):
         """FacetChart can be converted to dict and back."""
-        df = pl.DataFrame({
-            "x": [1, 2, 3, 4, 5, 6],
-            "y": [10, 20, 30, 40, 50, 60],
-            "group": ["A", "A", "A", "B", "B", "B"],
-        })
-        chart = ggsql.render_altair(df, "VISUALISE x, y FACET WRAP group DRAW point", validate=False)
+        df = pl.DataFrame(
+            {
+                "x": [1, 2, 3, 4, 5, 6],
+                "y": [10, 20, 30, 40, 50, 60],
+                "group": ["A", "A", "A", "B", "B", "B"],
+            }
+        )
+        chart = ggsql.render_altair(
+            df, "VISUALISE x, y FACET WRAP group DRAW point", validate=False
+        )
 
         # Convert to dict (skip validation for ggsql specs)
         spec = chart.to_dict(validate=False)
@@ -140,11 +319,13 @@ class TestRenderAltairChartTypeDetection:
 
     def test_chart_with_color_encoding(self):
         """Charts with color encoding still return correct type."""
-        df = pl.DataFrame({
-            "x": [1, 2, 3, 4],
-            "y": [10, 20, 30, 40],
-            "category": ["A", "B", "A", "B"],
-        })
+        df = pl.DataFrame(
+            {
+                "x": [1, 2, 3, 4],
+                "y": [10, 20, 30, 40],
+                "category": ["A", "B", "A", "B"],
+            }
+        )
         chart = ggsql.render_altair(df, "VISUALISE x, y, category AS color DRAW point")
         # Should still be a LayerChart (ggsql wraps in layer)
         assert isinstance(chart, altair.LayerChart)
@@ -157,3 +338,180 @@ class TestRenderAltairErrorHandling:
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
         with pytest.raises(ValueError):
             ggsql.render_altair(df, "NOT VALID SYNTAX")
+
+
+class TestTwoStageAPIIntegration:
+    """Integration tests for the two-stage prepare -> render API."""
+
+    def test_end_to_end_workflow(self):
+        """Complete workflow: create reader, register data, prepare, render."""
+        # Create reader
+        reader = ggsql.DuckDBReader("duckdb://memory")
+
+        # Register data
+        df = pl.DataFrame(
+            {
+                "date": ["2024-01-01", "2024-01-02", "2024-01-03"],
+                "value": [10, 20, 30],
+                "region": ["North", "South", "North"],
+            }
+        )
+        reader.register("sales", df)
+
+        # Prepare visualization
+        prepared = ggsql.prepare(
+            "SELECT * FROM sales VISUALISE date AS x, value AS y, region AS color DRAW line",
+            reader,
+        )
+
+        # Verify metadata
+        assert prepared.metadata()["rows"] == 3
+        assert prepared.layer_count() == 1
+
+        # Render to Vega-Lite
+        writer = ggsql.VegaLiteWriter()
+        result = prepared.render(writer)
+
+        # Verify output
+        spec = json.loads(result)
+        assert "$schema" in spec
+        assert "line" in json.dumps(spec)
+
+    def test_can_introspect_prepared(self):
+        """Test all introspection methods on Prepared."""
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+
+        # All these should work without error
+        assert prepared.sql() is not None
+        assert prepared.visual() is not None
+        assert prepared.layer_count() >= 1
+        assert prepared.metadata() is not None
+        assert prepared.data() is not None
+        assert prepared.warnings() is not None
+
+        # Layer-specific accessors (may return None)
+        _ = prepared.layer_data(0)
+        _ = prepared.stat_data(0)
+        _ = prepared.layer_sql(0)
+        _ = prepared.stat_sql(0)
+
+
+class TestCustomReader:
+    """Tests for custom Python reader support."""
+
+    def test_simple_custom_reader(self):
+        """Custom reader with execute() method works."""
+
+        class SimpleReader:
+            def execute(self, sql: str) -> pl.DataFrame:
+                return pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
+
+        reader = SimpleReader()
+        prepared = ggsql.prepare("SELECT * FROM data VISUALISE x, y DRAW point", reader)
+        assert prepared.metadata()["rows"] == 3
+
+    def test_custom_reader_with_register(self):
+        """Custom reader with register() support."""
+
+        class RegisterReader:
+            def __init__(self):
+                self.tables = {}
+
+            def execute(self, sql: str) -> pl.DataFrame:
+                # Simple: just return the first registered table
+                if self.tables:
+                    return next(iter(self.tables.values()))
+                return pl.DataFrame({"x": [1], "y": [2]})
+
+            def supports_register(self) -> bool:
+                return True
+
+            def register(self, name: str, df: pl.DataFrame) -> None:
+                self.tables[name] = df
+
+        reader = RegisterReader()
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+        assert prepared is not None
+
+    def test_custom_reader_error_handling(self):
+        """Custom reader errors are propagated."""
+
+        class ErrorReader:
+            def execute(self, sql: str) -> pl.DataFrame:
+                raise ValueError("Custom reader error")
+
+        reader = ErrorReader()
+        with pytest.raises(ValueError, match="Custom reader error"):
+            ggsql.prepare("SELECT 1 VISUALISE x, y DRAW point", reader)
+
+    def test_custom_reader_wrong_return_type(self):
+        """Custom reader returning wrong type raises TypeError."""
+
+        class WrongTypeReader:
+            def execute(self, sql: str):
+                return {"x": [1, 2, 3]}  # dict, not DataFrame
+
+        reader = WrongTypeReader()
+        with pytest.raises((ValueError, TypeError)):
+            ggsql.prepare("SELECT 1 VISUALISE x, y DRAW point", reader)
+
+    def test_native_reader_fast_path(self):
+        """Native DuckDBReader still works (fast path)."""
+        reader = ggsql.DuckDBReader("duckdb://memory")
+        prepared = ggsql.prepare(
+            "SELECT 1 AS x, 2 AS y VISUALISE x, y DRAW point", reader
+        )
+        assert prepared.metadata()["rows"] == 1
+
+    def test_custom_reader_can_render(self):
+        """Custom reader result can be rendered to Vega-Lite."""
+
+        class StaticReader:
+            def execute(self, sql: str) -> pl.DataFrame:
+                return pl.DataFrame(
+                    {
+                        "x": [1, 2, 3, 4, 5],
+                        "y": [10, 40, 20, 50, 30],
+                        "category": ["A", "B", "A", "B", "A"],
+                    }
+                )
+
+        reader = StaticReader()
+        prepared = ggsql.prepare(
+            "SELECT * FROM data VISUALISE x, y, category AS color DRAW point",
+            reader,
+        )
+
+        writer = ggsql.VegaLiteWriter()
+        result = prepared.render(writer)
+
+        spec = json.loads(result)
+        assert "$schema" in spec
+        assert "vega-lite" in spec["$schema"]
+
+    def test_custom_reader_execute_called(self):
+        """Verify execute() is called on the custom reader."""
+
+        class RecordingReader:
+            def __init__(self):
+                self.execute_calls = []
+
+            def execute(self, sql: str) -> pl.DataFrame:
+                self.execute_calls.append(sql)
+                return pl.DataFrame({"x": [1], "y": [2]})
+
+        reader = RecordingReader()
+        ggsql.prepare(
+            "SELECT * FROM data VISUALISE x, y DRAW point",
+            reader,
+        )
+
+        # execute() should have been called at least once
+        assert len(reader.execute_calls) > 0
+        # All calls should be valid SQL strings
+        assert all(isinstance(sql, str) for sql in reader.execute_calls)

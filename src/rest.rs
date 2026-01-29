@@ -31,12 +31,12 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use ggsql::{parser, GgsqlError, VERSION};
+use ggsql::{parser, validate, GgsqlError, VERSION};
 
 #[cfg(feature = "duckdb")]
 use ggsql::reader::DuckDBReader;
 #[cfg(feature = "duckdb")]
-use ggsql::{parse, prepare};
+use ggsql::prepare;
 
 #[cfg(feature = "vegalite")]
 use ggsql::writer::VegaLiteWriter;
@@ -508,22 +508,21 @@ async fn parse_handler(
 ) -> Result<Json<ApiSuccess<ParseResult>>, ApiErrorResponse> {
     info!("Parsing query: {} chars", request.query.len());
 
-    // Split query (for backwards compatibility)
-    let (sql_part, viz_part) = parser::split_query(&request.query)?;
+    // Validate query to get sql/viz portions
+    let validated = validate(&request.query)?;
 
-    // Parse using new API
-    let parsed = parse(&request.query)?;
+    // Parse ggsql portion
+    let specs = parser::parse_query(&request.query)?;
 
     // Convert specs to JSON
-    let specs_json: Vec<serde_json::Value> = parsed
-        .plots()
+    let specs_json: Vec<serde_json::Value> = specs
         .iter()
         .map(|spec| serde_json::to_value(spec).unwrap_or(serde_json::Value::Null))
         .collect();
 
     let result = ParseResult {
-        sql_portion: sql_part,
-        viz_portion: viz_part,
+        sql_portion: validated.sql().to_string(),
+        viz_portion: validated.visual().to_string(),
         specs: specs_json,
     };
 
@@ -540,8 +539,8 @@ async fn parse_handler(
 ) -> Result<Json<ApiSuccess<ParseResult>>, ApiErrorResponse> {
     info!("Parsing query: {} chars", request.query.len());
 
-    // Split query
-    let (sql_part, viz_part) = parser::split_query(&request.query)?;
+    // Validate query to get sql/viz portions
+    let validated = validate(&request.query)?;
 
     // Parse ggsql portion
     let specs = parser::parse_query(&request.query)?;
@@ -553,8 +552,8 @@ async fn parse_handler(
         .collect();
 
     let result = ParseResult {
-        sql_portion: sql_part,
-        viz_portion: viz_part,
+        sql_portion: validated.sql().to_string(),
+        viz_portion: validated.visual().to_string(),
         specs: specs_json,
     };
 

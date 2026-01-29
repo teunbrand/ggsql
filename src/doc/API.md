@@ -514,7 +514,4 @@ def validate(query: str) -> Validated:
 
 def prepare(query: str, reader: DuckDBReader) -> Prepared:
     """Prepare a query for visualization."""
-
-def split_query(query: str) -> tuple[str, str]:
-    """Split query into (sql, visualise) portions."""
 ```
