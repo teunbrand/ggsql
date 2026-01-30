@@ -93,7 +93,6 @@ out-dir = "target/release/packager"
 # Binaries to include in the package
 binaries = [
   { path = "ggsql", main = true },
-  { path = "ggsql-rest", main = false },
 ]
 
 # Resources to bundle (optional)

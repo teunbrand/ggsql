@@ -55,11 +55,11 @@ Output location: `src/target/release/packager/`
 
 The installers include:
 
-- ✅ **ggsql** - Main CLI binary (always included)
-- ✅ **ggsql-rest** - REST API server (optional component)
-- ❌ **ggsql-jupyter** - Not included (requires Python runtime)
+- ✅ **ggsql** - Main CLI binary
 
-The Jupyter kernel must be installed separately via `cargo install ggsql-jupyter`.
+**Not included** (install separately if needed):
+- **ggsql-rest** - REST API server: `cargo install ggsql --features rest-api`
+- **ggsql-jupyter** - Jupyter kernel: `cargo install ggsql-jupyter`
 
 ## Configuration
 
