@@ -78,3 +78,22 @@ python = ["dep:pyo3"]
 rest-api = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber", "duckdb", "vegalite"]
 all-readers = ["duckdb", "postgres", "sqlite"]
 all-writers = ["vegalite", "ggplot2", "plotters"]
+
+# cargo-packager configuration for cross-platform installers
+[package.metadata.packager]
+product-name = "ggsql"
+identifier = "com.ggsql.app"
+category = "DeveloperTool"
+publisher = "ggsql Team"
+authors = ["ggsql Team"]
+icons = ["../doc/assets/icon.svg", "../doc/assets/logo.png"]
+license-file = "../LICENSE.md"
+out-dir = "target/release/packager"
+
+# Binaries to include in the package
+binaries = [
+  { path = "ggsql", main = true },
+]
+
+# Resources to bundle (optional)
+resources = []
