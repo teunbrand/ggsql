@@ -24,11 +24,11 @@ use std::io::Cursor;
 ///
 /// // In-memory database
 /// let reader = DuckDBReader::from_connection_string("duckdb://memory")?;
-/// let df = reader.execute("SELECT 1 as x, 2 as y")?;
+/// let df = reader.execute_sql("SELECT 1 as x, 2 as y")?;
 ///
 /// // File-based database
 /// let reader = DuckDBReader::from_connection_string("duckdb://data.db")?;
-/// let df = reader.execute("SELECT * FROM sales")?;
+/// let df = reader.execute_sql("SELECT * FROM sales")?;
 /// ```
 pub struct DuckDBReader {
     conn: Connection,
@@ -380,7 +380,7 @@ impl ColumnBuilder {
 }
 
 impl Reader for DuckDBReader {
-    fn execute(&self, sql: &str) -> Result<DataFrame> {
+    fn execute_sql(&self, sql: &str) -> Result<DataFrame> {
         use polars::prelude::*;
 
         // Check if this is a DDL statement (CREATE, DROP, INSERT, UPDATE, DELETE, ALTER)
@@ -544,7 +544,7 @@ mod tests {
     #[test]
     fn test_simple_query() {
         let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
-        let df = reader.execute("SELECT 1 as x, 2 as y").unwrap();
+        let df = reader.execute_sql("SELECT 1 as x, 2 as y").unwrap();
 
         assert_eq!(df.shape(), (1, 2));
         assert_eq!(df.get_column_names(), vec!["x", "y"]);
@@ -567,7 +567,7 @@ mod tests {
             .unwrap();
 
         // Query data
-        let df = reader.execute("SELECT * FROM test").unwrap();
+        let df = reader.execute_sql("SELECT * FROM test").unwrap();
 
         assert_eq!(df.shape(), (2, 2));
         assert_eq!(df.get_column_names(), vec!["x", "y"]);
@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn test_invalid_sql() {
         let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
-        let result = reader.execute("INVALID SQL SYNTAX");
+        let result = reader.execute_sql("INVALID SQL SYNTAX");
         assert!(result.is_err());
     }
 
@@ -598,7 +598,7 @@ mod tests {
             .unwrap();
 
         let df = reader
-            .execute("SELECT region, SUM(revenue) as total FROM sales GROUP BY region")
+            .execute_sql("SELECT region, SUM(revenue) as total FROM sales GROUP BY region")
             .unwrap();
 
         assert_eq!(df.shape(), (2, 2));
@@ -620,7 +620,7 @@ mod tests {
         reader.register("my_table", df).unwrap();
 
         // Query the registered table
-        let result = reader.execute("SELECT * FROM my_table ORDER BY x").unwrap();
+        let result = reader.execute_sql("SELECT * FROM my_table ORDER BY x").unwrap();
         assert_eq!(result.shape(), (3, 2));
         assert_eq!(result.get_column_names(), vec!["x", "y"]);
     }
@@ -698,7 +698,7 @@ mod tests {
         reader.register("empty_table", df).unwrap();
 
         // Query should return empty result with correct schema
-        let result = reader.execute("SELECT * FROM empty_table").unwrap();
+        let result = reader.execute_sql("SELECT * FROM empty_table").unwrap();
         assert_eq!(result.shape(), (0, 2));
         assert_eq!(result.get_column_names(), vec!["x", "y"]);
     }

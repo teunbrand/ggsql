@@ -62,7 +62,7 @@ class TestDuckDBReader:
 
     def test_execute_simple_query(self):
         reader = ggsql.DuckDBReader("duckdb://memory")
-        df = reader.execute("SELECT 1 AS x, 2 AS y")
+        df = reader.execute_sql("SELECT 1 AS x, 2 AS y")
         assert isinstance(df, pl.DataFrame)
         assert df.shape == (1, 2)
         assert list(df.columns) == ["x", "y"]
@@ -72,7 +72,7 @@ class TestDuckDBReader:
         df = pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
         reader.register("my_data", df)
 
-        result = reader.execute("SELECT * FROM my_data WHERE x > 1")
+        result = reader.execute_sql("SELECT * FROM my_data WHERE x > 1")
         assert isinstance(result, pl.DataFrame)
         assert result.shape == (2, 2)
 
@@ -406,7 +406,7 @@ class TestCustomReader:
         """Custom reader with execute() method works."""
 
         class SimpleReader:
-            def execute(self, sql: str) -> pl.DataFrame:
+            def execute_sql(self, sql: str) -> pl.DataFrame:
                 return pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
 
         reader = SimpleReader()
@@ -420,7 +420,7 @@ class TestCustomReader:
             def __init__(self):
                 self.tables = {}
 
-            def execute(self, sql: str) -> pl.DataFrame:
+            def execute_sql(self, sql: str) -> pl.DataFrame:
                 # Simple: just return the first registered table
                 if self.tables:
                     return next(iter(self.tables.values()))
@@ -442,7 +442,7 @@ class TestCustomReader:
         """Custom reader errors are propagated."""
 
         class ErrorReader:
-            def execute(self, sql: str) -> pl.DataFrame:
+            def execute_sql(self, sql: str) -> pl.DataFrame:
                 raise ValueError("Custom reader error")
 
         reader = ErrorReader()
@@ -453,7 +453,7 @@ class TestCustomReader:
         """Custom reader returning wrong type raises TypeError."""
 
         class WrongTypeReader:
-            def execute(self, sql: str):
+            def execute_sql(self, sql: str):
                 return {"x": [1, 2, 3]}  # dict, not DataFrame
 
         reader = WrongTypeReader()
@@ -472,7 +472,7 @@ class TestCustomReader:
         """Custom reader result can be rendered to Vega-Lite."""
 
         class StaticReader:
-            def execute(self, sql: str) -> pl.DataFrame:
+            def execute_sql(self, sql: str) -> pl.DataFrame:
                 return pl.DataFrame(
                     {
                         "x": [1, 2, 3, 4, 5],
@@ -501,7 +501,7 @@ class TestCustomReader:
             def __init__(self):
                 self.execute_calls = []
 
-            def execute(self, sql: str) -> pl.DataFrame:
+            def execute_sql(self, sql: str) -> pl.DataFrame:
                 self.execute_calls.append(sql)
                 return pl.DataFrame({"x": [1], "y": [2]})
 

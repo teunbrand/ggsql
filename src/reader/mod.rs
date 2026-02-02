@@ -17,12 +17,12 @@
 //!
 //! // Basic usage
 //! let reader = DuckDBReader::from_connection_string("duckdb://memory")?;
-//! let df = reader.execute("SELECT * FROM table")?;
+//! let df = reader.execute_sql("SELECT * FROM table")?;
 //!
 //! // With DataFrame registration
 //! let mut reader = DuckDBReader::from_connection_string("duckdb://memory")?;
 //! reader.register("my_table", some_dataframe)?;
-//! let result = reader.execute("SELECT * FROM my_table")?;
+//! let result = reader.execute_sql("SELECT * FROM my_table")?;
 //! ```
 
 use crate::{DataFrame, GgsqlError, Result};
@@ -53,7 +53,7 @@ pub use duckdb::DuckDBReader;
 /// reader.register("sales", sales_df)?;
 ///
 /// // Now you can query it
-/// let result = reader.execute("SELECT * FROM sales WHERE amount > 100")?;
+/// let result = reader.execute_sql("SELECT * FROM sales WHERE amount > 100")?;
 /// ```
 pub trait Reader {
     /// Execute a SQL query and return the result as a DataFrame
@@ -72,7 +72,7 @@ pub trait Reader {
     /// - The SQL is invalid
     /// - The connection fails
     /// - The table or columns don't exist
-    fn execute(&self, sql: &str) -> Result<DataFrame>;
+    fn execute_sql(&self, sql: &str) -> Result<DataFrame>;
 
     /// Register a DataFrame as a queryable table (takes ownership)
     ///

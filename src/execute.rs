@@ -1185,7 +1185,7 @@ where
 /// Convenience wrapper around `prepare_data_with_executor` for direct DuckDB reader usage.
 #[cfg(feature = "duckdb")]
 pub fn prepare_data(query: &str, reader: &DuckDBReader) -> Result<PreparedData> {
-    prepare_data_with_executor(query, |sql| reader.execute(sql))
+    prepare_data_with_executor(query, |sql| reader.execute_sql(sql))
 }
 
 #[cfg(test)]

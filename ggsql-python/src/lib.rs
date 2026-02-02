@@ -62,7 +62,7 @@ fn py_to_polars_inner(df: &Bound<'_, PyAny>) -> PyResult<DataFrame> {
 
     df.call_method1("write_ipc", (&bytes_io,)).map_err(|_| {
         PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "Reader.execute() must return a polars.DataFrame",
+            "Reader.execute_sql() must return a polars.DataFrame",
         )
     })?;
 
@@ -127,12 +127,12 @@ struct PyReaderBridge {
 }
 
 impl Reader for PyReaderBridge {
-    fn execute(&self, sql: &str) -> ggsql::Result<DataFrame> {
+    fn execute_sql(&self, sql: &str) -> ggsql::Result<DataFrame> {
         Python::attach(|py| {
             let bound = self.obj.bind(py);
             let result = bound
-                .call_method1("execute", (sql,))
-                .map_err(|e| GgsqlError::ReaderError(format!("Reader.execute() failed: {}", e)))?;
+                .call_method1("execute_sql", (sql,))
+                .map_err(|e| GgsqlError::ReaderError(format!("Reader.execute_sql() failed: {}", e)))?;
             py_to_polars_inner(&result).map_err(|e| GgsqlError::ReaderError(e.to_string()))
         })
     }
@@ -190,11 +190,11 @@ macro_rules! try_native_readers {
 /// Examples
 /// --------
 /// >>> reader = DuckDBReader("duckdb://memory")
-/// >>> df = reader.execute("SELECT 1 as x, 2 as y")
+/// >>> df = reader.execute_sql("SELECT 1 as x, 2 as y")
 ///
 /// >>> reader = DuckDBReader("duckdb://memory")
 /// >>> reader.register("data", pl.DataFrame({"x": [1, 2, 3]}))
-/// >>> df = reader.execute("SELECT * FROM data WHERE x > 1")
+/// >>> df = reader.execute_sql("SELECT * FROM data WHERE x > 1")
 #[pyclass(name = "DuckDBReader", unsendable)]
 struct PyDuckDBReader {
     inner: RustDuckDBReader,
@@ -264,10 +264,10 @@ impl PyDuckDBReader {
     /// ------
     /// ValueError
     ///     If the SQL is invalid or execution fails.
-    fn execute(&self, py: Python<'_>, sql: &str) -> PyResult<Py<PyAny>> {
+    fn execute_sql(&self, py: Python<'_>, sql: &str) -> PyResult<Py<PyAny>> {
         let df = self
             .inner
-            .execute(sql)
+            .execute_sql(sql)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         polars_to_py(py, &df)
     }

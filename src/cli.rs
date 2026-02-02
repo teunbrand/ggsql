@@ -335,7 +335,7 @@ fn print_table_fallback(query: &str, reader: &DuckDBReader, max_rows: usize) {
     }
     let parsed = parsed.unwrap();
 
-    let data = reader.execute(&parsed);
+    let data = reader.execute_sql(&parsed);
     if let Err(e) = data {
         eprintln!("Failed to execute SQL query: {}", e);
         std::process::exit(1)

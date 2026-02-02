@@ -127,7 +127,7 @@ reader = ggsql.DuckDBReader("duckdb:///path/to/file.db")  # File database
 **Methods:**
 
 - `register(name: str, df: polars.DataFrame)` - Register a DataFrame as a queryable table
-- `execute(sql: str) -> polars.DataFrame` - Execute SQL and return results
+- `execute_sql(sql: str) -> polars.DataFrame` - Execute SQL and return results
 - `supports_register() -> bool` - Check if registration is supported
 
 #### `VegaLiteWriter()`
@@ -236,7 +236,7 @@ ggsql.render_altair(df, "VISUALISE x, y, category AS color DRAW point")
 
 ### Custom Readers
 
-You can use any Python object with an `execute(sql: str) -> polars.DataFrame` method as a reader. This enables integration with any data source.
+You can use any Python object with an `execute_sql(sql: str) -> polars.DataFrame` method as a reader. This enables integration with any data source.
 
 ```python
 import ggsql
@@ -248,7 +248,7 @@ class CSVReader:
     def __init__(self, data_dir: str):
         self.data_dir = data_dir
 
-    def execute(self, sql: str) -> pl.DataFrame:
+    def execute_sql(self, sql: str) -> pl.DataFrame:
         # Simple implementation: ignore SQL and return fixed data
         # A real implementation would parse SQL to determine which file to load
         return pl.read_csv(f"{self.data_dir}/data.csv")
@@ -275,7 +275,7 @@ class AdvancedReader:
     def __init__(self):
         self.tables = {}
 
-    def execute(self, sql: str) -> pl.DataFrame:
+    def execute_sql(self, sql: str) -> pl.DataFrame:
         # Your SQL execution logic here
         ...
 

@@ -245,7 +245,7 @@ pub fn prepare(query: &str, reader: &dyn Reader) -> Result<Prepared> {
     let warnings: Vec<ValidationWarning> = validated.warnings().to_vec();
 
     // Prepare data (this also validates, but we want the warnings from above)
-    let prepared_data = prepare_data_with_executor(query, |sql| reader.execute(sql))?;
+    let prepared_data = prepare_data_with_executor(query, |sql| reader.execute_sql(sql))?;
 
     Ok(Prepared::new(
         prepared_data.spec,

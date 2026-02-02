@@ -374,7 +374,7 @@ pub struct Location {
 ```rust
 pub trait Reader {
     /// Execute a SQL query and return a DataFrame
-    fn execute(&self, sql: &str) -> Result<DataFrame>;
+    fn execute_sql(&self, sql: &str) -> Result<DataFrame>;
 
     /// Register a DataFrame as a queryable table
     fn register(&mut self, name: &str, df: DataFrame) -> Result<()>;
@@ -425,7 +425,7 @@ class DuckDBReader:
             df: Polars DataFrame or narwhals-compatible DataFrame
         """
 
-    def execute(self, sql: str) -> polars.DataFrame:
+    def execute_sql(self, sql: str) -> polars.DataFrame:
         """Execute SQL and return a Polars DataFrame."""
 
     def supports_register(self) -> bool:

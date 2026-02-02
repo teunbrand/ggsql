@@ -207,7 +207,7 @@ let json = prepared.render(&writer)?;
 
 **Reader trait** (data source abstraction):
 
-- `execute(sql)` - Run SQL, return DataFrame
+- `execute_sql(sql)` - Run SQL, return DataFrame
 - `register(name, df)` - Register DataFrame as table
 - Implementation: `DuckDBReader`
 
@@ -505,7 +505,7 @@ pub type Result<T> = std::result::Result<T, GgsqlError>;
 
 ```rust
 pub trait Reader {
-    fn execute(&self, sql: &str) -> Result<DataFrame>;
+    fn execute_sql(&self, sql: &str) -> Result<DataFrame>;
     fn supports_query(&self, sql: &str) -> bool;
 }
 ```
@@ -871,7 +871,7 @@ When running in Positron IDE, the extension provides enhanced functionality:
 - PyO3-based Rust bindings compiled to a native Python extension
 - Two-stage API mirroring the Rust API: `prepare()` → `render()`
 - DuckDB reader with DataFrame registration
-- Custom Python reader support: any object with `execute(sql) -> DataFrame` method
+- Custom Python reader support: any object with `execute_sql(sql) -> DataFrame` method
 - Works with any narwhals-compatible DataFrame (polars, pandas, etc.)
 - LazyFrames are collected automatically
 - Returns native `altair.Chart` objects via `render_altair()` convenience function
@@ -976,7 +976,7 @@ print(f"Errors: {validated.errors()}")
 
 **Custom Python Readers**:
 
-Any Python object with an `execute(sql: str) -> polars.DataFrame` method can be used as a reader:
+Any Python object with an `execute_sql(sql: str) -> polars.DataFrame` method can be used as a reader:
 
 ```python
 import ggsql
@@ -985,7 +985,7 @@ import polars as pl
 class MyReader:
     """Custom reader that returns static data."""
 
-    def execute(self, sql: str) -> pl.DataFrame:
+    def execute_sql(self, sql: str) -> pl.DataFrame:
         return pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]})
 
 # Use custom reader with prepare()
