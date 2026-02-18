@@ -516,10 +516,18 @@ impl Reader for DuckDBReader {
             )));
         }
 
-        // DuckDB's Arrow virtual table function (in duckdb-rs) writes an entire
-        // RecordBatch into a single DataChunk whose vectors have a fixed capacity
-        // of STANDARD_VECTOR_SIZE (2048). Passing a RecordBatch with more rows
-        // causes a panic. Work around this by chunking large DataFrames.
+        // Workaround for a duckdb-rs limitation (not a DuckDB limitation).
+        //
+        // duckdb-rs's `ArrowVTab` writes each RecordBatch into a single DuckDB
+        // `DataChunk`, which has a fixed capacity of `STANDARD_VECTOR_SIZE`.
+        // That constant is defined in DuckDB's C++ source at
+        // `src/include/duckdb/common/constants.hpp` and is currently 2048.
+        // When a RecordBatch exceeds this, `FlatVector::copy` panics with
+        // `assertion failed: data.len() <= self.capacity()`.
+        //
+        // We chunk large DataFrames to stay within this limit. The first chunk
+        // creates the table (letting DuckDB infer the schema from Arrow), and
+        // subsequent chunks INSERT into it.
         const MAX_ARROW_BATCH_ROWS: usize = 2048;
         let total_rows = df.height();
 
