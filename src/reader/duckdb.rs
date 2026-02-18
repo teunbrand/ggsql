@@ -558,10 +558,7 @@ impl Reader for DuckDBReader {
                 let chunk_size = std::cmp::min(MAX_ARROW_BATCH_ROWS, total_rows - offset);
                 let chunk = df.slice(offset as i64, chunk_size);
                 let params = dataframe_to_arrow_params(chunk)?;
-                let insert_sql = format!(
-                    "INSERT INTO \"{}\" SELECT * FROM arrow(?, ?)",
-                    name
-                );
+                let insert_sql = format!("INSERT INTO \"{}\" SELECT * FROM arrow(?, ?)", name);
                 self.conn.execute(&insert_sql, params).map_err(|e| {
                     GgsqlError::ReaderError(format!(
                         "Failed to insert chunk into table '{}': {}",
@@ -859,9 +856,18 @@ mod tests {
         let result = reader
             .execute_sql("SELECT id, name FROM large_table ORDER BY id LIMIT 1")
             .unwrap();
-        assert_eq!(result.column("id").unwrap().i32().unwrap().get(0).unwrap(), 0);
         assert_eq!(
-            result.column("name").unwrap().str().unwrap().get(0).unwrap(),
+            result.column("id").unwrap().i32().unwrap().get(0).unwrap(),
+            0
+        );
+        assert_eq!(
+            result
+                .column("name")
+                .unwrap()
+                .str()
+                .unwrap()
+                .get(0)
+                .unwrap(),
             "item_0"
         );
 
@@ -873,7 +879,13 @@ mod tests {
             (n - 1) as i32
         );
         assert_eq!(
-            result.column("name").unwrap().str().unwrap().get(0).unwrap(),
+            result
+                .column("name")
+                .unwrap()
+                .str()
+                .unwrap()
+                .get(0)
+                .unwrap(),
             format!("item_{}", n - 1)
         );
     }
