@@ -887,6 +887,7 @@ pub(super) fn map_aesthetic_name(aesthetic: &str) -> String {
         "linewidth" => "strokeWidth",
         // Text aesthetics
         "label" => "text",
+        "fontsize" => "size",
         // All other aesthetics pass through directly
         // (fill and stroke map to Vega-Lite's separate fill/stroke channels)
         _ => aesthetic,

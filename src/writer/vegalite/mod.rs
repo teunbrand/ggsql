@@ -605,6 +605,7 @@ mod tests {
         assert_eq!(map_aesthetic_name("linetype"), "strokeDash");
         assert_eq!(map_aesthetic_name("linewidth"), "strokeWidth");
         assert_eq!(map_aesthetic_name("label"), "text");
+        assert_eq!(map_aesthetic_name("fontsize"), "size");
     }
 
     #[test]
@@ -689,6 +690,68 @@ mod tests {
         assert_eq!(vl_spec["title"], "My Chart");
         assert_eq!(vl_spec["layer"][0]["mark"]["type"], "line");
         assert_eq!(vl_spec["layer"][0]["mark"]["clip"], true);
+    }
+
+    #[test]
+    fn test_fontsize_linear_scaling() {
+        use crate::plot::{ArrayElement, OutputRange, Scale, ScaleType};
+
+        let writer = VegaLiteWriter::new();
+
+        // Create spec with text geom using fontsize aesthetic
+        let mut spec = Plot::new();
+        let layer = Layer::new(Geom::text())
+            .with_aesthetic(
+                "x".to_string(),
+                AestheticValue::standard_column("x".to_string()),
+            )
+            .with_aesthetic(
+                "y".to_string(),
+                AestheticValue::standard_column("y".to_string()),
+            )
+            .with_aesthetic(
+                "fontsize".to_string(),
+                AestheticValue::standard_column("value".to_string()),
+            );
+        spec.layers.push(layer);
+
+        // Add fontsize scale with explicit range
+        let mut scale = Scale::new("fontsize");
+        scale.scale_type = Some(ScaleType::continuous());
+        scale.output_range = Some(OutputRange::Array(vec![
+            ArrayElement::Number(10.0),
+            ArrayElement::Number(20.0),
+        ]));
+        spec.scales.push(scale);
+
+        // Create DataFrame
+        let df = df! {
+            "x" => &[1, 2, 3],
+            "y" => &[1, 2, 3],
+            "value" => &[1.0, 2.0, 3.0],
+        }
+        .unwrap();
+
+        // Generate Vega-Lite JSON
+        let json_str = writer.write(&spec, &wrap_data(df)).unwrap();
+        let vl_spec: Value = serde_json::from_str(&json_str).unwrap();
+
+        // Verify fontsize maps to size channel
+        let encoding = &vl_spec["layer"][0]["encoding"];
+        assert!(encoding["size"].is_object(), "Should have size encoding");
+        assert!(
+            encoding["fontsize"].is_null(),
+            "Should not have fontsize encoding"
+        );
+
+        // Verify scale range is linear (no area conversion)
+        let scale_range = &encoding["size"]["scale"]["range"];
+        assert!(scale_range.is_array(), "Scale should have range array");
+        let range = scale_range.as_array().unwrap();
+        assert_eq!(range.len(), 2);
+        // Should be 10 and 20, NOT ~31 and ~126 (which would be area-converted)
+        assert_eq!(range[0].as_f64().unwrap(), 10.0);
+        assert_eq!(range[1].as_f64().unwrap(), 20.0);
     }
 
     #[test]
