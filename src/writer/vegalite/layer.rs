@@ -227,7 +227,7 @@ impl GeomRenderer for PathRenderer {
 // =============================================================================
 
 /// Font property tuple: (family, fontWeight, fontStyle, align, baseline) as converted Vega-Lite Values
-type FontKey = (Value, Value, Value, Value, Value);
+type FontKey = (Option<Value>, Value, Value, Value, Value);
 
 /// Renderer for text geom - handles font properties via data splitting
 pub struct TextRenderer;
@@ -277,7 +277,7 @@ impl TextRenderer {
                 hjust_val,
                 vjust_val,
             );
-            groups.entry(key).or_insert_with(Vec::new).push(row_idx);
+            groups.entry(key).or_default().push(row_idx);
         }
 
         // Convert to Vec and sort by first occurrence (for ORDER BY preservation)
@@ -288,8 +288,12 @@ impl TextRenderer {
     }
 
     /// Convert family string to Vega-Lite font value
-    fn convert_family(value: &str) -> Value {
-        json!(value)
+    fn convert_family(value: &str) -> Option<Value> {
+        if value.is_empty() {
+            None
+        } else {
+            Some(json!(value))
+        }
     }
 
     /// Convert fontface string to Vega-Lite fontWeight and fontStyle values
@@ -374,7 +378,7 @@ impl TextRenderer {
             if let Some(mark) = layer_spec.get_mut("mark") {
                 if let Some(mark_obj) = mark.as_object_mut() {
                     // Apply font properties
-                    if family_val.as_str().map_or(true, |s| !s.is_empty()) {
+                    if let Some(family_val) = family_val {
                         mark_obj.insert("font".to_string(), family_val.clone());
                     }
                     mark_obj.insert("fontWeight".to_string(), font_weight_val.clone());
