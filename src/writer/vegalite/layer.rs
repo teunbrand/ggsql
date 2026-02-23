@@ -226,8 +226,8 @@ impl GeomRenderer for PathRenderer {
 // Text Renderer
 // =============================================================================
 
-/// Font property tuple: (family, fontWeight, fontStyle, align, baseline) as converted Vega-Lite Values
-type FontKey = (Option<Value>, Value, Value, Value, Value);
+/// Font property tuple: (family, fontWeight, fontStyle, align, baseline, angle) as converted Vega-Lite Values
+type FontKey = (Option<Value>, Value, Value, Value, Value, Value);
 
 /// Renderer for text geom - handles font properties via data splitting
 pub struct TextRenderer;
@@ -256,6 +256,10 @@ impl TextRenderer {
             .column(&naming::aesthetic_column("vjust"))
             .ok()
             .and_then(|s| s.str().ok());
+        let angle_col = df
+            .column(&naming::aesthetic_column("angle"))
+            .ok()
+            .and_then(|s| s.str().ok());
 
         // Group rows by converted font property tuple
         for row_idx in 0..nrows {
@@ -263,12 +267,14 @@ impl TextRenderer {
             let fontface_str = fontface_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
             let hjust_str = hjust_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
             let vjust_str = vjust_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
+            let angle_str = angle_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
 
             // Convert to Vega-Lite property values immediately
             let family_val = Self::convert_family(family_str);
             let (font_weight_val, font_style_val) = Self::convert_fontface(fontface_str);
             let hjust_val = Self::convert_hjust(hjust_str);
             let vjust_val = Self::convert_vjust(vjust_str);
+            let angle_val = Self::convert_angle(angle_str);
 
             let key = (
                 family_val,
@@ -276,6 +282,7 @@ impl TextRenderer {
                 font_style_val,
                 hjust_val,
                 vjust_val,
+                angle_val,
             );
             groups.entry(key).or_default().push(row_idx);
         }
@@ -367,6 +374,14 @@ impl TextRenderer {
         json!(baseline)
     }
 
+    /// Convert angle string to Vega-Lite angle value (degrees)
+    fn convert_angle(value: &str) -> Value {
+        match value.parse::<f64>() {
+            Ok(angle) => json!(angle),
+            Err(_) => json!(0.0),
+        }
+    }
+
     /// Filter DataFrame to specific row indices
     fn filter_by_indices(data: &DataFrame, indices: &[usize]) -> Result<DataFrame> {
         use polars::prelude::{BooleanChunked, NamedFrom};
@@ -387,7 +402,7 @@ impl TextRenderer {
 
     /// Apply font properties to mark object
     fn apply_font_properties(mark_obj: &mut Map<String, Value>, font_key: &FontKey) {
-        let (family_val, font_weight_val, font_style_val, hjust_val, vjust_val) = font_key;
+        let (family_val, font_weight_val, font_style_val, hjust_val, vjust_val, angle_val) = font_key;
 
         if let Some(family_val) = family_val {
             mark_obj.insert("font".to_string(), family_val.clone());
@@ -396,6 +411,7 @@ impl TextRenderer {
         mark_obj.insert("fontStyle".to_string(), font_style_val.clone());
         mark_obj.insert("align".to_string(), hjust_val.clone());
         mark_obj.insert("baseline".to_string(), vjust_val.clone());
+        mark_obj.insert("angle".to_string(), angle_val.clone());
     }
 
     /// Build transform with source filter
@@ -499,7 +515,7 @@ impl GeomRenderer for TextRenderer {
 
     fn modify_encoding(&self, encoding: &mut Map<String, Value>, _layer: &Layer) -> Result<()> {
         // Remove font aesthetics from encoding - they only work as mark properties
-        for &aesthetic in &["family", "fontface", "hjust", "vjust"] {
+        for &aesthetic in &["family", "fontface", "hjust", "vjust", "angle"] {
             encoding.remove(aesthetic);
         }
 

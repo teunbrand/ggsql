@@ -15,7 +15,7 @@ impl GeomTrait for Text {
         GeomAesthetics {
             supported: &[
                 "x", "y", "label", "stroke", "fontsize", "opacity", "family", "fontface", "hjust",
-                "vjust",
+                "vjust", "angle",
             ],
             required: &["x", "y"],
             hidden: &[],
