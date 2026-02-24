@@ -129,6 +129,7 @@ pub trait GeomRenderer: Send + Sync {
     fn prepare_data(
         &self,
         df: &DataFrame,
+        _layer: &Layer,
         _data_key: &str,
         binned_columns: &HashMap<String, Vec<f64>>,
     ) -> Result<PreparedData> {
@@ -233,6 +234,25 @@ type FontKey = (Option<Value>, Value, Value, Value, Value, Value);
 pub struct TextRenderer;
 
 impl TextRenderer {
+    /// Apply label formatting if format parameter is specified.
+    /// Returns a new DataFrame with the label column formatted, or the original if no formatting.
+    fn apply_label_formatting(df: &DataFrame, layer: &Layer) -> Result<DataFrame> {
+        use crate::format;
+        use crate::naming;
+        use crate::plot::ParameterValue;
+
+        // Check if format parameter is specified
+        let format_template = match layer.parameters.get("format") {
+            Some(ParameterValue::String(template)) => template,
+            _ => return Ok(df.clone()), // No formatting, return original
+        };
+
+        // Use format.rs helper to do the formatting
+        let label_col_name = naming::aesthetic_column("label");
+        format::format_dataframe_column(df, &label_col_name, format_template)
+            .map_err(|e| GgsqlError::WriterError(e))
+    }
+
     /// Analyze DataFrame columns to build font property runs using run-length encoding.
     /// Returns Vec of (font_key, length) tuples representing consecutive rows with identical font properties.
     /// Start positions are implicit (derived from cumulative lengths).
@@ -489,11 +509,15 @@ impl GeomRenderer for TextRenderer {
     fn prepare_data(
         &self,
         df: &DataFrame,
+        layer: &Layer,
         _data_key: &str,
         binned_columns: &HashMap<String, Vec<f64>>,
     ) -> Result<PreparedData> {
+        // Apply label formatting if specified
+        let df = Self::apply_label_formatting(df, layer)?;
+
         // Analyze font columns to get RLE runs
-        let font_runs = Self::build_font_rle(df)?;
+        let font_runs = Self::build_font_rle(&df)?;
 
         // Split data by font runs, tracking cumulative position
         let mut components: HashMap<String, Vec<Value>> = HashMap::new();
@@ -1093,6 +1117,7 @@ impl GeomRenderer for BoxplotRenderer {
     fn prepare_data(
         &self,
         df: &DataFrame,
+        _layer: &Layer,
         _data_key: &str,
         binned_columns: &HashMap<String, Vec<f64>>,
     ) -> Result<PreparedData> {
@@ -1265,6 +1290,7 @@ mod tests {
         use polars::prelude::*;
 
         let renderer = TextRenderer;
+        let layer = Layer::new(crate::plot::Geom::text());
 
         // Create DataFrame where all rows have the same font
         let df = df! {
@@ -1276,7 +1302,7 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in single layer with _font_0 component key
-        let prepared = renderer.prepare_data(&df, "test", &HashMap::new()).unwrap();
+        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
 
         match prepared {
             PreparedData::Composite { components, .. } => {
@@ -1294,6 +1320,7 @@ mod tests {
         use polars::prelude::*;
 
         let renderer = TextRenderer;
+        let layer = Layer::new(crate::plot::Geom::text());
 
         // Create DataFrame with different fonts per row
         let df = df! {
@@ -1305,7 +1332,7 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in multiple layers
-        let prepared = renderer.prepare_data(&df, "test", &HashMap::new()).unwrap();
+        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
 
         match prepared {
             PreparedData::Composite { components, .. } => {
@@ -1325,6 +1352,7 @@ mod tests {
         use polars::prelude::*;
 
         let renderer = TextRenderer;
+        let layer = Layer::new(crate::plot::Geom::text());
 
         // Create DataFrame with different fonts
         let df = df! {
@@ -1337,7 +1365,7 @@ mod tests {
         .unwrap();
 
         // Prepare data
-        let prepared = renderer.prepare_data(&df, "test", &HashMap::new()).unwrap();
+        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
 
         // Get the components
         let components = match &prepared {
@@ -1401,6 +1429,7 @@ mod tests {
         use polars::prelude::*;
 
         let renderer = TextRenderer;
+        let layer = Layer::new(crate::plot::Geom::text());
 
         // Create DataFrame with different angles
         let df = df! {
@@ -1412,7 +1441,7 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in multiple layers (one per unique angle)
-        let prepared = renderer.prepare_data(&df, "test", &HashMap::new()).unwrap();
+        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
 
         match &prepared {
             PreparedData::Composite { components, .. } => {
@@ -1465,6 +1494,7 @@ mod tests {
         use polars::prelude::*;
 
         let renderer = TextRenderer;
+        let layer = Layer::new(crate::plot::Geom::text());
 
         // Create DataFrame with numeric angle column (matching actual query)
         let df = df! {
@@ -1476,7 +1506,7 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in multiple layers (one per unique angle)
-        let prepared = renderer.prepare_data(&df, "test", &HashMap::new()).unwrap();
+        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
 
         match &prepared {
             PreparedData::Composite { components, .. } => {
@@ -1676,5 +1706,105 @@ mod tests {
                 "yOffset should be -10"
             );
         }
+    }
+
+    #[test]
+    fn test_text_label_formatting() {
+        use crate::execute;
+        use crate::reader::DuckDBReader;
+        use crate::writer::vegalite::VegaLiteWriter;
+        use crate::writer::Writer;
+
+        // Integration test: format parameter should transform label values
+
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        // Query with format parameter using Title case transformation
+        let query = r#"
+            SELECT
+                n::INTEGER as x,
+                n::INTEGER as y,
+                CASE
+                    WHEN n = 0 THEN 'north region'
+                    WHEN n = 1 THEN 'south region'
+                    ELSE 'east region'
+                END as region
+            FROM generate_series(0, 2) as t(n)
+            VISUALISE x, y, region AS label
+            DRAW text SETTING format => 'Region: {:Title}'
+        "#;
+
+        // Execute and prepare data
+        let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
+        assert_eq!(prepared.specs.len(), 1);
+
+        let spec = &prepared.specs[0];
+        assert_eq!(spec.layers.len(), 1);
+
+        // Generate Vega-Lite JSON
+        let writer = VegaLiteWriter::new();
+        let json_str = writer.write(spec, &prepared.data).unwrap();
+        let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // Check that data has formatted labels
+        let data_values = vl_spec["data"]["values"].as_array().unwrap();
+        assert!(!data_values.is_empty());
+
+        // Verify formatted labels in the data
+        let label_col = crate::naming::aesthetic_column("label");
+
+        // Check each row has properly formatted labels
+        let labels: Vec<&str> = data_values
+            .iter()
+            .filter_map(|row| row[&label_col].as_str())
+            .collect();
+
+        assert_eq!(labels.len(), 3);
+        assert!(labels.contains(&"Region: North Region"));
+        assert!(labels.contains(&"Region: South Region"));
+        assert!(labels.contains(&"Region: East Region"));
+    }
+
+    #[test]
+    fn test_text_label_formatting_numeric() {
+        use crate::execute;
+        use crate::reader::DuckDBReader;
+        use crate::writer::vegalite::VegaLiteWriter;
+        use crate::writer::Writer;
+
+        // Test numeric formatting with printf-style format
+
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = r#"
+            SELECT
+                n::INTEGER as x,
+                n::INTEGER as y,
+                n::FLOAT * 10.5 as value
+            FROM generate_series(0, 2) as t(n)
+            VISUALISE x, y, value AS label
+            DRAW text SETTING format => '${:num %.2f}'
+        "#;
+
+        let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
+        let spec = &prepared.specs[0];
+
+        let writer = VegaLiteWriter::new();
+        let json_str = writer.write(spec, &prepared.data).unwrap();
+        let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let data_values = vl_spec["data"]["values"].as_array().unwrap();
+        let label_col = crate::naming::aesthetic_column("label");
+
+        let labels: Vec<&str> = data_values
+            .iter()
+            .filter_map(|row| row[&label_col].as_str())
+            .collect();
+
+        // Should have formatted currency values
+        assert_eq!(labels.len(), 3);
+        assert!(labels.contains(&"$0.00"));
+        assert!(labels.contains(&"$10.50"));
+        assert!(labels.contains(&"$21.00"));
     }
 }

@@ -33,6 +33,10 @@ impl GeomTrait for Label {
                 name: "nudge_y",
                 default: DefaultParamValue::Null,
             },
+            DefaultParam {
+                name: "format",
+                default: DefaultParamValue::Null,
+            },
         ]
     }
 }

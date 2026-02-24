@@ -34,6 +34,10 @@ impl GeomTrait for Text {
                 name: "nudge_y",
                 default: DefaultParamValue::Null,
             },
+            DefaultParam {
+                name: "format",
+                default: DefaultParamValue::Null,
+            },
         ]
     }
 }
