@@ -1,5 +1,4 @@
 //! Label geom implementation
-
 use super::{GeomAesthetics, GeomTrait, GeomType};
 
 /// Label geom - text labels with background
@@ -15,7 +14,7 @@ impl GeomTrait for Label {
         GeomAesthetics {
             supported: &[
                 "x", "y", "label", "fill", "stroke", "fontsize", "opacity", "family", "fontface",
-                "hjust", "vjust",
+                "hjust", "vjust", "angle",
             ],
             required: &["x", "y"],
             hidden: &[],

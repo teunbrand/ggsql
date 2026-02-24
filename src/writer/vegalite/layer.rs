@@ -256,10 +256,9 @@ impl TextRenderer {
             .column(&naming::aesthetic_column("vjust"))
             .ok()
             .and_then(|s| s.str().ok());
-        let angle_col = df
-            .column(&naming::aesthetic_column("angle"))
-            .ok()
-            .and_then(|s| s.str().ok());
+
+        // Angle can be numeric or string, so get the raw column
+        let angle_col = df.column(&naming::aesthetic_column("angle")).ok();
 
         // Group rows by converted font property tuple
         for row_idx in 0..nrows {
@@ -267,14 +266,13 @@ impl TextRenderer {
             let fontface_str = fontface_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
             let hjust_str = hjust_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
             let vjust_str = vjust_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
-            let angle_str = angle_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
 
             // Convert to Vega-Lite property values immediately
             let family_val = Self::convert_family(family_str);
             let (font_weight_val, font_style_val) = Self::convert_fontface(fontface_str);
             let hjust_val = Self::convert_hjust(hjust_str);
             let vjust_val = Self::convert_vjust(vjust_str);
-            let angle_val = Self::convert_angle(angle_str);
+            let angle_val = Self::convert_angle(angle_col, row_idx);
 
             let key = (
                 family_val,
@@ -374,12 +372,39 @@ impl TextRenderer {
         json!(baseline)
     }
 
-    /// Convert angle string to Vega-Lite angle value (degrees)
-    fn convert_angle(value: &str) -> Value {
-        match value.parse::<f64>() {
-            Ok(angle) => json!(angle),
-            Err(_) => json!(0.0),
+    /// Convert angle column value to Vega-Lite angle value (degrees)
+    /// Handles both numeric and string columns
+    /// Normalizes angles to [0, 360) range
+    fn convert_angle(angle_col: Option<&polars::prelude::Column>, row_idx: usize) -> Value {
+        use polars::prelude::*;
+
+        let normalize_angle = |angle: f64| {
+            let normalized = angle % 360.0;
+            if normalized < 0.0 {
+                normalized + 360.0
+            } else {
+                normalized
+            }
+        };
+
+        if let Some(col) = angle_col {
+            // Try as numeric first (int or float)
+            if let Ok(num_series) = col.cast(&DataType::Float64) {
+                if let Some(val) = num_series.f64().ok().and_then(|ca| ca.get(row_idx)) {
+                    return json!(normalize_angle(val));
+                }
+            }
+            // Try as string
+            if let Ok(str_ca) = col.str() {
+                if let Some(s) = str_ca.get(row_idx) {
+                    if let Ok(angle) = s.parse::<f64>() {
+                        return json!(normalize_angle(angle));
+                    }
+                }
+            }
         }
+        // Default to 0.0 if column missing or value unparseable
+        json!(0.0)
     }
 
     /// Filter DataFrame to specific row indices
@@ -402,7 +427,8 @@ impl TextRenderer {
 
     /// Apply font properties to mark object
     fn apply_font_properties(mark_obj: &mut Map<String, Value>, font_key: &FontKey) {
-        let (family_val, font_weight_val, font_style_val, hjust_val, vjust_val, angle_val) = font_key;
+        let (family_val, font_weight_val, font_style_val, hjust_val, vjust_val, angle_val) =
+            font_key;
 
         if let Some(family_val) = family_val {
             mark_obj.insert("font".to_string(), family_val.clone());
@@ -415,10 +441,7 @@ impl TextRenderer {
     }
 
     /// Build transform with source filter
-    fn build_transform_with_filter(
-        prototype: &Value,
-        source_key: &str,
-    ) -> Vec<Value> {
+    fn build_transform_with_filter(prototype: &Value, source_key: &str) -> Vec<Value> {
         let source_filter = json!({
             "filter": {
                 "field": naming::SOURCE_COLUMN,
@@ -1355,7 +1378,9 @@ mod tests {
         let layer = crate::plot::Layer::new(crate::plot::Geom::text());
 
         // Call finalize to get layers
-        let layers = renderer.finalize(prototype.clone(), &layer, "test", &prepared).unwrap();
+        let layers = renderer
+            .finalize(prototype.clone(), &layer, "test", &prepared)
+            .unwrap();
 
         // For multiple font groups, should return single parent spec with nested layers
         assert_eq!(layers.len(), 1);
@@ -1382,6 +1407,222 @@ mod tests {
             let mark = nested_layer["mark"].as_object().unwrap();
             assert!(mark.contains_key("fontWeight"));
             assert!(mark.contains_key("fontStyle"));
+        }
+    }
+
+    #[test]
+    fn test_text_varying_angle() {
+        use crate::naming;
+        use polars::prelude::*;
+
+        let renderer = TextRenderer;
+
+        // Create DataFrame with different angles
+        let df = df! {
+            naming::aesthetic_column("x").as_str() => &[1.0, 2.0, 3.0],
+            naming::aesthetic_column("y").as_str() => &[10.0, 20.0, 30.0],
+            naming::aesthetic_column("label").as_str() => &["A", "B", "C"],
+            naming::aesthetic_column("angle").as_str() => &["0", "45", "90"],
+        }
+        .unwrap();
+
+        // Prepare data - should result in multiple layers (one per unique angle)
+        let prepared = renderer.prepare_data(&df, "test", &HashMap::new()).unwrap();
+
+        match &prepared {
+            PreparedData::Composite { components, .. } => {
+                // Should have 3 components (one per unique angle)
+                assert_eq!(components.len(), 3);
+                assert!(components.contains_key("_font_0"));
+                assert!(components.contains_key("_font_1"));
+                assert!(components.contains_key("_font_2"));
+            }
+            _ => panic!("Expected Composite"),
+        }
+
+        // Build prototype spec
+        let prototype = json!({
+            "mark": {"type": "text"},
+            "encoding": {
+                "x": {"field": naming::aesthetic_column("x"), "type": "quantitative"},
+                "y": {"field": naming::aesthetic_column("y"), "type": "quantitative"},
+                "text": {"field": naming::aesthetic_column("label"), "type": "nominal"}
+            }
+        });
+
+        // Create a dummy layer
+        let layer = crate::plot::Layer::new(crate::plot::Geom::text());
+
+        // Call finalize to get layers
+        let layers = renderer
+            .finalize(prototype.clone(), &layer, "test", &prepared)
+            .unwrap();
+
+        // Should return single parent spec with nested layers
+        assert_eq!(layers.len(), 1);
+
+        let parent_spec = &layers[0];
+        let nested_layers = parent_spec["layer"].as_array().unwrap();
+
+        // Should have 3 nested layers (one per unique angle)
+        assert_eq!(nested_layers.len(), 3);
+
+        // Each layer should have angle property in mark
+        for nested_layer in nested_layers {
+            let mark = nested_layer["mark"].as_object().unwrap();
+            assert!(mark.contains_key("angle"));
+        }
+    }
+
+    #[test]
+    fn test_text_varying_angle_numeric() {
+        use crate::naming;
+        use polars::prelude::*;
+
+        let renderer = TextRenderer;
+
+        // Create DataFrame with numeric angle column (matching actual query)
+        let df = df! {
+            naming::aesthetic_column("x").as_str() => &[1, 2, 3],
+            naming::aesthetic_column("y").as_str() => &[1, 2, 3],
+            naming::aesthetic_column("label").as_str() => &["A", "B", "C"],
+            naming::aesthetic_column("angle").as_str() => &[0i32, 180i32, 0i32],  // integer column
+        }
+        .unwrap();
+
+        // Prepare data - should result in multiple layers (one per unique angle)
+        let prepared = renderer.prepare_data(&df, "test", &HashMap::new()).unwrap();
+
+        match &prepared {
+            PreparedData::Composite { components, .. } => {
+                // Should have 3 components: angle 0 at row 0, angle 180 at row 1, angle 0 at row 2
+                // Due to non-contiguous indices, rows 0 and 2 should be in separate components
+                eprintln!("Number of components: {}", components.len());
+                eprintln!(
+                    "Component keys: {:?}",
+                    components.keys().collect::<Vec<_>>()
+                );
+                assert_eq!(components.len(), 3);
+            }
+            _ => panic!("Expected Composite"),
+        }
+    }
+
+    #[test]
+    fn test_text_angle_integration() {
+        use crate::execute;
+        use crate::naming;
+        use crate::reader::DuckDBReader;
+        use crate::writer::vegalite::VegaLiteWriter;
+        use crate::writer::Writer;
+
+        // Integration test: Full pipeline from SQL query to Vega-Lite with angle aesthetic
+        // This tests that angle values properly create separate layers with angle mark properties
+
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        // Query with text geom and varying angles
+        let query = r#"
+            SELECT
+                n::INTEGER as x,
+                n::INTEGER as y,
+                chr(65 + n::INTEGER) as label,
+                CASE
+                    WHEN n = 0 THEN 0
+                    WHEN n = 1 THEN 45
+                    WHEN n = 2 THEN 90
+                    ELSE 0
+                END as rotation
+            FROM generate_series(0, 2) as t(n)
+            VISUALISE x, y, label, rotation AS angle
+            DRAW text
+        "#;
+
+        // Execute and prepare data
+        let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
+        assert_eq!(prepared.specs.len(), 1);
+
+        let spec = &prepared.specs[0];
+        assert_eq!(spec.layers.len(), 1);
+
+        // Generate Vega-Lite JSON
+        let writer = VegaLiteWriter::new();
+        let json_str = writer.write(spec, &prepared.data).unwrap();
+        let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // Text renderer should create nested layers structure
+        assert!(
+            vl_spec["layer"].is_array(),
+            "Should have top-level layer array"
+        );
+        let top_layers = vl_spec["layer"].as_array().unwrap();
+        assert_eq!(top_layers.len(), 1, "Should have one parent text layer");
+
+        // Parent layer should have shared encoding and nested layers
+        let parent_layer = &top_layers[0];
+        assert!(
+            parent_layer["encoding"].is_object(),
+            "Parent layer should have shared encoding"
+        );
+        assert!(
+            parent_layer["layer"].is_array(),
+            "Parent layer should have nested layers"
+        );
+
+        let nested_layers = parent_layer["layer"].as_array().unwrap();
+
+        // Should have multiple nested layers (one per unique angle value)
+        // We have angles: 0, 45, 90, 0 -> but non-contiguous 0s split into separate layers
+        assert!(
+            nested_layers.len() >= 3,
+            "Should have at least 3 nested layers for different angles, got {}",
+            nested_layers.len()
+        );
+
+        // Each nested layer should have mark with angle property
+        for (idx, nested_layer) in nested_layers.iter().enumerate() {
+            let mark = nested_layer["mark"].as_object().unwrap();
+            assert!(
+                mark.contains_key("angle"),
+                "Nested layer {} mark should have angle property",
+                idx
+            );
+            assert_eq!(mark["type"], "text");
+
+            // Should have source filter transform
+            assert!(nested_layer["transform"].is_array());
+
+            // Should NOT have encoding (inherited from parent)
+            assert!(nested_layer.get("encoding").is_none());
+        }
+
+        // Verify angles are present and normalized [0, 360)
+        let angles: Vec<f64> = nested_layers
+            .iter()
+            .filter_map(|layer| {
+                layer["mark"]
+                    .as_object()
+                    .and_then(|m| m.get("angle"))
+                    .and_then(|a| a.as_f64())
+            })
+            .collect();
+
+        // Should have the three distinct angles: 0, 45, 90
+        assert!(angles.contains(&0.0), "Should have 0° angle");
+        assert!(angles.contains(&45.0), "Should have 45° angle");
+        assert!(angles.contains(&90.0), "Should have 90° angle");
+
+        // Verify data has angle column
+        let data_values = vl_spec["data"]["values"].as_array().unwrap();
+        assert!(!data_values.is_empty());
+
+        let angle_col = naming::aesthetic_column("angle");
+        for row in data_values {
+            assert!(
+                row[&angle_col].is_number(),
+                "Data row should have numeric angle: {:?}",
+                row
+            );
         }
     }
 }
