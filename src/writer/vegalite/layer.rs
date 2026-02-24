@@ -250,7 +250,7 @@ impl TextRenderer {
         // Use format.rs helper to do the formatting
         let label_col_name = naming::aesthetic_column("label");
         format::format_dataframe_column(df, &label_col_name, format_template)
-            .map_err(|e| GgsqlError::WriterError(e))
+            .map_err(GgsqlError::WriterError)
     }
 
     /// Analyze DataFrame columns to build font property runs using run-length encoding.
@@ -300,7 +300,7 @@ impl TextRenderer {
             let (font_weight_val, font_style_val) = Self::convert_fontface(fontface_str);
             let hjust_val = Self::convert_hjust(hjust_str);
             let vjust_val = Self::convert_vjust(vjust_str);
-            let angle_val = Self::convert_angle(angle_col.as_deref(), row_idx);
+            let angle_val = Self::convert_angle(angle_col, row_idx);
 
             let key = (
                 family_val,
@@ -583,9 +583,7 @@ impl GeomRenderer for TextRenderer {
         // Downcast metadata to font runs
         let font_runs = metadata
             .downcast_ref::<Vec<(FontKey, usize)>>()
-            .ok_or_else(|| {
-                GgsqlError::InternalError("Failed to downcast font runs".to_string())
-            })?;
+            .ok_or_else(|| GgsqlError::InternalError("Failed to downcast font runs".to_string()))?;
 
         // Generate nested layers from font runs (works for single or multiple runs)
         self.finalize_nested_layers(prototype, data_key, font_runs, layer)
@@ -1284,7 +1282,9 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in single layer with _font_0 component key
-        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
+        let prepared = renderer
+            .prepare_data(&df, &layer, "test", &HashMap::new())
+            .unwrap();
 
         match prepared {
             PreparedData::Composite { components, .. } => {
@@ -1314,7 +1314,9 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in multiple layers
-        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
+        let prepared = renderer
+            .prepare_data(&df, &layer, "test", &HashMap::new())
+            .unwrap();
 
         match prepared {
             PreparedData::Composite { components, .. } => {
@@ -1347,7 +1349,9 @@ mod tests {
         .unwrap();
 
         // Prepare data
-        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
+        let prepared = renderer
+            .prepare_data(&df, &layer, "test", &HashMap::new())
+            .unwrap();
 
         // Get the components
         let components = match &prepared {
@@ -1423,7 +1427,9 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in multiple layers (one per unique angle)
-        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
+        let prepared = renderer
+            .prepare_data(&df, &layer, "test", &HashMap::new())
+            .unwrap();
 
         match &prepared {
             PreparedData::Composite { components, .. } => {
@@ -1488,7 +1494,9 @@ mod tests {
         .unwrap();
 
         // Prepare data - should result in multiple layers (one per unique angle)
-        let prepared = renderer.prepare_data(&df, &layer, "test", &HashMap::new()).unwrap();
+        let prepared = renderer
+            .prepare_data(&df, &layer, "test", &HashMap::new())
+            .unwrap();
 
         match &prepared {
             PreparedData::Composite { components, .. } => {
