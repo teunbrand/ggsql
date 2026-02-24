@@ -233,11 +233,15 @@ type FontKey = (Option<Value>, Value, Value, Value, Value, Value);
 pub struct TextRenderer;
 
 impl TextRenderer {
-    /// Analyze DataFrame columns to build font property groups.
-    /// Returns sorted Vec of (font_key, row_indices) tuples, ordered by first row index.
-    fn analyze_font_columns(df: &DataFrame) -> Result<Vec<(FontKey, Vec<usize>)>> {
+    /// Analyze DataFrame columns to build font property runs using run-length encoding.
+    /// Returns Vec of (font_key, length) tuples representing consecutive rows with identical font properties.
+    /// Start positions are implicit (derived from cumulative lengths).
+    fn build_font_rle(df: &DataFrame) -> Result<Vec<(FontKey, usize)>> {
         let nrows = df.height();
-        let mut groups: HashMap<FontKey, Vec<usize>> = HashMap::new();
+
+        if nrows == 0 {
+            return Ok(Vec::new());
+        }
 
         // Extract all font columns (or use defaults if missing)
         let family_col = df
@@ -260,7 +264,11 @@ impl TextRenderer {
         // Angle can be numeric or string, so get the raw column
         let angle_col = df.column(&naming::aesthetic_column("angle")).ok();
 
-        // Group rows by converted font property tuple
+        // Run-length encoding: group consecutive rows with same font properties
+        let mut runs = Vec::new();
+        let mut current_key: Option<FontKey> = None;
+        let mut run_length = 0;
+
         for row_idx in 0..nrows {
             let family_str = family_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
             let fontface_str = fontface_col.and_then(|ca| ca.get(row_idx)).unwrap_or("");
@@ -272,7 +280,7 @@ impl TextRenderer {
             let (font_weight_val, font_style_val) = Self::convert_fontface(fontface_str);
             let hjust_val = Self::convert_hjust(hjust_str);
             let vjust_val = Self::convert_vjust(vjust_str);
-            let angle_val = Self::convert_angle(angle_col, row_idx);
+            let angle_val = Self::convert_angle(angle_col.as_deref(), row_idx);
 
             let key = (
                 family_val,
@@ -282,47 +290,25 @@ impl TextRenderer {
                 vjust_val,
                 angle_val,
             );
-            groups.entry(key).or_default().push(row_idx);
-        }
 
-        // Convert to Vec and sort by first occurrence (for ORDER BY preservation)
-        let mut sorted_groups: Vec<(FontKey, Vec<usize>)> = groups.into_iter().collect();
-        sorted_groups.sort_by_key(|(_, indices)| indices[0]);
-
-        // Split non-contiguous indices into separate ranges to preserve z-order
-        let mut split_groups = Vec::new();
-        for (font_key, indices) in sorted_groups {
-            let ranges = Self::split_contiguous(&indices);
-            for range in ranges {
-                split_groups.push((font_key.clone(), range));
+            // If font properties changed, emit previous run and start new one
+            if Some(&key) != current_key.as_ref() {
+                if let Some(prev_key) = current_key {
+                    runs.push((prev_key, run_length));
+                    run_length = 0;
+                }
+                current_key = Some(key);
             }
+
+            run_length += 1;
         }
 
-        Ok(split_groups)
-    }
-
-    /// Split indices into contiguous ranges
-    fn split_contiguous(indices: &[usize]) -> Vec<Vec<usize>> {
-        if indices.is_empty() {
-            return vec![];
+        // Don't forget the last run
+        if let Some(key) = current_key {
+            runs.push((key, run_length));
         }
 
-        let mut sorted = indices.to_vec();
-        sorted.sort_unstable();
-
-        let mut ranges = Vec::new();
-        let mut current = vec![sorted[0]];
-
-        for &idx in &sorted[1..] {
-            if idx == current.last().unwrap() + 1 {
-                current.push(idx);
-            } else {
-                ranges.push(current);
-                current = vec![idx];
-            }
-        }
-        ranges.push(current);
-        ranges
+        Ok(runs)
     }
 
     /// Convert family string to Vega-Lite font value
@@ -407,24 +393,6 @@ impl TextRenderer {
         json!(0.0)
     }
 
-    /// Filter DataFrame to specific row indices
-    fn filter_by_indices(data: &DataFrame, indices: &[usize]) -> Result<DataFrame> {
-        use polars::prelude::{BooleanChunked, NamedFrom};
-
-        let nrows = data.height();
-        let mut mask_data = vec![false; nrows];
-        for &idx in indices {
-            if idx < nrows {
-                mask_data[idx] = true;
-            }
-        }
-
-        let mask = BooleanChunked::new("".into(), mask_data);
-
-        data.filter(&mask)
-            .map_err(|e| GgsqlError::WriterError(e.to_string()))
-    }
-
     /// Apply font properties to mark object
     fn apply_font_properties(mark_obj: &mut Map<String, Value>, font_key: &FontKey) {
         let (family_val, font_weight_val, font_style_val, hjust_val, vjust_val, angle_val) =
@@ -460,23 +428,23 @@ impl TextRenderer {
         new_transforms
     }
 
-    /// Finalize layers as nested layer with shared encoding (works for single or multiple groups)
+    /// Finalize layers as nested layer with shared encoding (works for single or multiple runs)
     fn finalize_nested_layers(
         &self,
         prototype: Value,
         data_key: &str,
-        font_groups: &[(FontKey, Vec<usize>)],
+        font_runs: &[(FontKey, usize)],
     ) -> Result<Vec<Value>> {
         // Extract shared encoding from prototype
         let shared_encoding = prototype.get("encoding").cloned();
 
         // Build individual layers without encoding (mark + transform only)
-        // font_groups is already sorted by first occurrence, so no need to re-sort
-        let nested_layers: Vec<Value> = font_groups
+        // font_runs preserves natural row order through RLE
+        let nested_layers: Vec<Value> = font_runs
             .iter()
             .enumerate()
-            .map(|(group_idx, (font_key, _indices))| {
-                let suffix = format!("_font_{}", group_idx);
+            .map(|(run_idx, (font_key, _length))| {
+                let suffix = format!("_font_{}", run_idx);
                 let source_key = format!("{}{}", data_key, suffix);
 
                 // Create mark object with font properties
@@ -511,28 +479,32 @@ impl GeomRenderer for TextRenderer {
         _data_key: &str,
         binned_columns: &HashMap<String, Vec<f64>>,
     ) -> Result<PreparedData> {
-        // Analyze font columns to get sorted groups
-        let font_groups = Self::analyze_font_columns(df)?;
+        // Analyze font columns to get RLE runs
+        let font_runs = Self::build_font_rle(df)?;
 
-        // Split data by font groups
+        // Split data by font runs, tracking cumulative position
         let mut components: HashMap<String, Vec<Value>> = HashMap::new();
+        let mut position = 0;
 
-        for (group_idx, (_font_key, row_indices)) in font_groups.iter().enumerate() {
-            let suffix = format!("_font_{}", group_idx);
+        for (run_idx, (_font_key, length)) in font_runs.iter().enumerate() {
+            let suffix = format!("_font_{}", run_idx);
 
-            let filtered = Self::filter_by_indices(df, row_indices)?;
+            // Slice the contiguous run from the DataFrame (more efficient than boolean masking)
+            let sliced = df.slice(position as i64, *length);
+
             let values = if binned_columns.is_empty() {
-                dataframe_to_values(&filtered)?
+                dataframe_to_values(&sliced)?
             } else {
-                dataframe_to_values_with_bins(&filtered, binned_columns)?
+                dataframe_to_values_with_bins(&sliced, binned_columns)?
             };
 
             components.insert(suffix, values);
+            position += length;
         }
 
         Ok(PreparedData::Composite {
             components,
-            metadata: Box::new(font_groups),
+            metadata: Box::new(font_runs),
         })
     }
 
@@ -571,15 +543,15 @@ impl GeomRenderer for TextRenderer {
             ));
         };
 
-        // Downcast metadata to font groups
-        let font_groups = metadata
-            .downcast_ref::<Vec<(FontKey, Vec<usize>)>>()
+        // Downcast metadata to font runs
+        let font_runs = metadata
+            .downcast_ref::<Vec<(FontKey, usize)>>()
             .ok_or_else(|| {
-                GgsqlError::InternalError("Failed to downcast font groups".to_string())
+                GgsqlError::InternalError("Failed to downcast font runs".to_string())
             })?;
 
-        // Generate nested layers from font groups (works for single or multiple groups)
-        self.finalize_nested_layers(prototype, data_key, font_groups)
+        // Generate nested layers from font runs (works for single or multiple runs)
+        self.finalize_nested_layers(prototype, data_key, font_runs)
     }
 }
 
