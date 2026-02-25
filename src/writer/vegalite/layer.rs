@@ -1786,8 +1786,8 @@ mod tests {
             );
             assert_eq!(
                 mark["xOffset"].as_f64().unwrap(),
-                5.0,
-                "xOffset should be 5"
+                5.0 * POINTS_TO_PIXELS,
+                "xOffset should be 5 * POINTS_TO_PIXELS"
             );
 
             assert!(
@@ -1796,8 +1796,8 @@ mod tests {
             );
             assert_eq!(
                 mark["yOffset"].as_f64().unwrap(),
-                -10.0,
-                "yOffset should be -10"
+                10.0 * POINTS_TO_PIXELS,
+                "yOffset should be 10 * POINTS_TO_PIXELS (negated from nudge_y = -10)"
             );
         }
     }

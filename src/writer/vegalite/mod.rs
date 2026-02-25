@@ -1311,9 +1311,9 @@ mod tests {
         assert!(scale_range.is_array(), "Scale should have range array");
         let range = scale_range.as_array().unwrap();
         assert_eq!(range.len(), 2);
-        // Should be 10 and 20, NOT ~31 and ~126 (which would be area-converted)
-        assert_eq!(range[0].as_f64().unwrap(), 10.0);
-        assert_eq!(range[1].as_f64().unwrap(), 20.0);
+        // Should be 10 and 20 converted to pixels, NOT ~31 and ~126 (which would be area-converted)
+        assert_eq!(range[0].as_f64().unwrap(), 10.0 * POINTS_TO_PIXELS);
+        assert_eq!(range[1].as_f64().unwrap(), 20.0 * POINTS_TO_PIXELS);
     }
 
     #[test]
