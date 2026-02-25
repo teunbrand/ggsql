@@ -9,6 +9,7 @@
 
 use crate::plot::layer::geom::GeomType;
 use crate::plot::ParameterValue;
+use crate::writer::vegalite::POINTS_TO_PIXELS;
 use crate::{naming, AestheticValue, DataFrame, Geom, GgsqlError, Layer, Result};
 use polars::prelude::ChunkCompareEq;
 use serde_json::{json, Map, Value};
@@ -568,10 +569,10 @@ impl TextRenderer {
         if let Some(mark_map) = base_mark.as_object_mut() {
             // Extract nudge parameters (nudge_x → xOffset, nudge_y → yOffset)
             if let Some(ParameterValue::Number(x_offset)) = layer.parameters.get("nudge_x") {
-                mark_map.insert("xOffset".to_string(), json!(x_offset));
+                mark_map.insert("xOffset".to_string(), json!(x_offset * POINTS_TO_PIXELS));
             }
             if let Some(ParameterValue::Number(y_offset)) = layer.parameters.get("nudge_y") {
-                mark_map.insert("yOffset".to_string(), json!(y_offset));
+                mark_map.insert("yOffset".to_string(), json!(-y_offset * POINTS_TO_PIXELS));
             }
         }
 
