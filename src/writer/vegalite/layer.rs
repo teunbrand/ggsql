@@ -115,6 +115,62 @@ pub enum PreparedData {
     },
 }
 
+// =============================================================================
+// RenderContext
+// =============================================================================
+
+/// Context information available to renderers during layer preparation
+pub struct RenderContext<'a> {
+    /// Scale definitions (for extent and properties)
+    pub scales: &'a [crate::Scale],
+}
+
+impl<'a> RenderContext<'a> {
+    /// Create a new render context
+    pub fn new(scales: &'a [crate::Scale]) -> Self {
+        Self { scales }
+    }
+
+    /// Find a scale by aesthetic name
+    pub fn find_scale(&self, aesthetic: &str) -> Option<&crate::Scale> {
+        self.scales.iter().find(|s| s.aesthetic == aesthetic)
+    }
+
+    /// Get the numeric extent (min, max) for a given aesthetic from its scale
+    pub fn get_extent(&self, aesthetic: &str) -> Result<(f64, f64)> {
+        use crate::plot::ArrayElement;
+
+        // Find the scale for this aesthetic
+        let scale = self.find_scale(aesthetic).ok_or_else(|| {
+            GgsqlError::ValidationError(format!(
+                "Cannot determine extent for aesthetic '{}': no scale found",
+                aesthetic
+            ))
+        })?;
+
+        // Extract continuous range from input_range
+        if let Some(range) = &scale.input_range {
+            if range.len() >= 2 {
+                match (&range[0], &range[1]) {
+                    (ArrayElement::Number(min), ArrayElement::Number(max)) => {
+                        return Ok((*min, *max));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Err(GgsqlError::ValidationError(format!(
+            "Cannot determine extent for aesthetic '{}': scale has no valid numeric range",
+            aesthetic
+        )))
+    }
+}
+
+// =============================================================================
+// GeomRenderer Trait System
+// =============================================================================
+
 /// Trait for rendering ggsql geoms to Vega-Lite layers
 ///
 /// Provides a three-phase rendering pipeline:
@@ -134,6 +190,7 @@ pub trait GeomRenderer: Send + Sync {
         df: &DataFrame,
         _data_key: &str,
         binned_columns: &HashMap<String, Vec<f64>>,
+        _context: &RenderContext,
     ) -> Result<PreparedData> {
         let values = if binned_columns.is_empty() {
             dataframe_to_values(df)?
@@ -147,13 +204,23 @@ pub trait GeomRenderer: Send + Sync {
 
     /// Modify the encoding map for this geom.
     /// Default: no modifications
-    fn modify_encoding(&self, _encoding: &mut Map<String, Value>, _layer: &Layer) -> Result<()> {
+    fn modify_encoding(
+        &self,
+        _encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         Ok(())
     }
 
     /// Modify the mark/layer spec for this geom.
     /// Default: no modifications
-    fn modify_spec(&self, _layer_spec: &mut Value, _layer: &Layer) -> Result<()> {
+    fn modify_spec(
+        &self,
+        _layer_spec: &mut Value,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -196,7 +263,12 @@ impl GeomRenderer for DefaultRenderer {}
 pub struct BarRenderer;
 
 impl GeomRenderer for BarRenderer {
-    fn modify_spec(&self, layer_spec: &mut Value, layer: &Layer) -> Result<()> {
+    fn modify_spec(
+        &self,
+        layer_spec: &mut Value,
+        layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         let width = match layer.parameters.get("width") {
             Some(ParameterValue::Number(w)) => *w,
             _ => 0.9,
@@ -218,7 +290,12 @@ impl GeomRenderer for BarRenderer {
 pub struct PathRenderer;
 
 impl GeomRenderer for PathRenderer {
-    fn modify_encoding(&self, encoding: &mut Map<String, Value>, _layer: &Layer) -> Result<()> {
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         // Use the natural data order
         encoding.insert("order".to_string(), json!({"value": Value::Null}));
         Ok(())
@@ -232,7 +309,12 @@ impl GeomRenderer for PathRenderer {
 pub struct SegmentRenderer;
 
 impl GeomRenderer for SegmentRenderer {
-    fn modify_encoding(&self, encoding: &mut Map<String, Value>, _layer: &Layer) -> Result<()> {
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         let has_x2 = encoding.contains_key("x2");
         let has_y2 = encoding.contains_key("y2");
         if !has_x2 && !has_y2 {
@@ -263,7 +345,12 @@ impl GeomRenderer for SegmentRenderer {
 pub struct RibbonRenderer;
 
 impl GeomRenderer for RibbonRenderer {
-    fn modify_encoding(&self, encoding: &mut Map<String, Value>, _layer: &Layer) -> Result<()> {
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         if let Some(ymax) = encoding.remove("ymax") {
             encoding.insert("y".to_string(), ymax);
         }
@@ -282,7 +369,12 @@ impl GeomRenderer for RibbonRenderer {
 pub struct AreaRenderer;
 
 impl GeomRenderer for AreaRenderer {
-    fn modify_encoding(&self, encoding: &mut Map<String, Value>, layer: &Layer) -> Result<()> {
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         if let Some(mut y) = encoding.remove("y") {
             let stack_value;
             if let Some(ParameterValue::String(stack)) = layer.parameters.get("stacking") {
@@ -315,7 +407,12 @@ impl GeomRenderer for AreaRenderer {
 pub struct PolygonRenderer;
 
 impl GeomRenderer for PolygonRenderer {
-    fn modify_encoding(&self, encoding: &mut Map<String, Value>, _layer: &Layer) -> Result<()> {
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         // Polygon needs both `fill` and `stroke` independently, but map_aesthetic_name()
         // converts fill -> color (which works for most geoms). For closed line marks,
         // we need actual `fill` and `stroke` channels, so we undo the mapping here.
@@ -327,7 +424,12 @@ impl GeomRenderer for PolygonRenderer {
         Ok(())
     }
 
-    fn modify_spec(&self, layer_spec: &mut Value, _layer: &Layer) -> Result<()> {
+    fn modify_spec(
+        &self,
+        layer_spec: &mut Value,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         layer_spec["mark"] = json!({
             "type": "line",
             "interpolate": "linear-closed"
@@ -344,7 +446,12 @@ impl GeomRenderer for PolygonRenderer {
 pub struct ViolinRenderer;
 
 impl GeomRenderer for ViolinRenderer {
-    fn modify_spec(&self, layer_spec: &mut Value, _layer: &Layer) -> Result<()> {
+    fn modify_spec(
+        &self,
+        layer_spec: &mut Value,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         layer_spec["mark"] = json!({
             "type": "line",
             "filled": true
@@ -399,7 +506,12 @@ impl GeomRenderer for ViolinRenderer {
         Ok(())
     }
 
-    fn modify_encoding(&self, encoding: &mut Map<String, Value>, _layer: &Layer) -> Result<()> {
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
         // Ensure x is in detail encoding to create separate violins per x category
         // This is needed because line marks with filled:true require detail to create separate paths
         let x_field = encoding
@@ -764,6 +876,7 @@ impl GeomRenderer for BoxplotRenderer {
         df: &DataFrame,
         _data_key: &str,
         binned_columns: &HashMap<String, Vec<f64>>,
+        _context: &RenderContext,
     ) -> Result<PreparedData> {
         let (components, grouping_cols, has_outliers) =
             self.prepare_components(df, binned_columns)?;
@@ -845,7 +958,10 @@ mod tests {
             "x".to_string(),
             json!({"field": "species", "type": "nominal"}),
         );
-        renderer.modify_encoding(&mut encoding, &layer).unwrap();
+        let context = RenderContext::new(&[]);
+        renderer
+            .modify_encoding(&mut encoding, &layer, &context)
+            .unwrap();
         assert_eq!(
             encoding.get("detail"),
             Some(&json!({"field": "species", "type": "nominal"}))
@@ -861,7 +977,10 @@ mod tests {
             "detail".to_string(),
             json!({"field": "island", "type": "nominal"}),
         );
-        renderer.modify_encoding(&mut encoding, &layer).unwrap();
+        let context = RenderContext::new(&[]);
+        renderer
+            .modify_encoding(&mut encoding, &layer, &context)
+            .unwrap();
         assert_eq!(
             encoding.get("detail"),
             Some(&json!([
@@ -880,7 +999,10 @@ mod tests {
             "detail".to_string(),
             json!({"field": "species", "type": "nominal"}),
         );
-        renderer.modify_encoding(&mut encoding, &layer).unwrap();
+        let context = RenderContext::new(&[]);
+        renderer
+            .modify_encoding(&mut encoding, &layer, &context)
+            .unwrap();
         assert_eq!(
             encoding.get("detail"),
             Some(&json!({"field": "species", "type": "nominal"}))
@@ -896,7 +1018,10 @@ mod tests {
             "detail".to_string(),
             json!([{"field": "island", "type": "nominal"}]),
         );
-        renderer.modify_encoding(&mut encoding, &layer).unwrap();
+        let context = RenderContext::new(&[]);
+        renderer
+            .modify_encoding(&mut encoding, &layer, &context)
+            .unwrap();
         assert_eq!(
             encoding.get("detail"),
             Some(&json!([
@@ -918,7 +1043,10 @@ mod tests {
                 {"field": "species", "type": "nominal"}
             ]),
         );
-        renderer.modify_encoding(&mut encoding, &layer).unwrap();
+        let context = RenderContext::new(&[]);
+        renderer
+            .modify_encoding(&mut encoding, &layer, &context)
+            .unwrap();
         assert_eq!(
             encoding.get("detail"),
             Some(&json!([
@@ -926,5 +1054,82 @@ mod tests {
                 {"field": "species", "type": "nominal"}
             ]))
         );
+    }
+
+    #[test]
+    fn test_render_context_get_extent() {
+        use crate::plot::{ArrayElement, Scale};
+
+        // Test success case: continuous scale with numeric range
+        let scales = vec![Scale {
+            aesthetic: "x".to_string(),
+            scale_type: None,
+            input_range: Some(vec![ArrayElement::Number(0.0), ArrayElement::Number(10.0)]),
+            explicit_input_range: false,
+            output_range: None,
+            transform: None,
+            explicit_transform: false,
+            properties: std::collections::HashMap::new(),
+            resolved: false,
+            label_mapping: None,
+            label_template: "{}".to_string(),
+        }];
+        let context = RenderContext::new(&scales);
+        let result = context.get_extent("x");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (0.0, 10.0));
+
+        // Test error case: scale not found
+        let context = RenderContext::new(&scales);
+        let result = context.get_extent("y");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no scale found"));
+
+        // Test error case: scale with no range
+        let scales = vec![Scale {
+            aesthetic: "x".to_string(),
+            scale_type: None,
+            input_range: None,
+            explicit_input_range: false,
+            output_range: None,
+            transform: None,
+            explicit_transform: false,
+            properties: std::collections::HashMap::new(),
+            resolved: false,
+            label_mapping: None,
+            label_template: "{}".to_string(),
+        }];
+        let context = RenderContext::new(&scales);
+        let result = context.get_extent("x");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no valid numeric range"));
+
+        // Test error case: scale with non-numeric range
+        let scales = vec![Scale {
+            aesthetic: "x".to_string(),
+            scale_type: None,
+            input_range: Some(vec![
+                ArrayElement::String("A".to_string()),
+                ArrayElement::String("B".to_string()),
+            ]),
+            explicit_input_range: false,
+            output_range: None,
+            transform: None,
+            explicit_transform: false,
+            properties: std::collections::HashMap::new(),
+            resolved: false,
+            label_mapping: None,
+            label_template: "{}".to_string(),
+        }];
+        let context = RenderContext::new(&scales);
+        let result = context.get_extent("x");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no valid numeric range"));
     }
 }
