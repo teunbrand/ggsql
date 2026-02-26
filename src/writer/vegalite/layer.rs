@@ -42,6 +42,7 @@ pub fn geom_to_mark(geom: &Geom) -> Value {
         GeomType::Segment => "rule",
         GeomType::HLine => "rule",
         GeomType::VLine => "rule",
+        GeomType::AbLine => "rule",
         _ => "point", // Default fallback
     };
     json!({
@@ -333,6 +334,119 @@ impl GeomRenderer for SegmentRenderer {
                 encoding.insert("y2".to_string(), y);
             }
         }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// ABLine Renderer
+// =============================================================================
+
+/// Renderer for abline geom - draws lines based on slope and intercept
+pub struct ABLineRenderer;
+
+impl GeomRenderer for ABLineRenderer {
+    fn prepare_data(
+        &self,
+        df: &DataFrame,
+        _data_key: &str,
+        _binned_columns: &HashMap<String, Vec<f64>>,
+        _context: &RenderContext,
+    ) -> Result<PreparedData> {
+        // Just convert DataFrame to JSON values
+        // No need to add xmin/xmax - they'll be encoded as literal values
+        let values = dataframe_to_values(df)?;
+        Ok(PreparedData::Single { values })
+    }
+
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
+        // Remove slope and intercept from encoding - they're only used in transforms
+        encoding.remove("slope");
+        encoding.remove("intercept");
+
+        // Add x/x2/y/y2 encodings for rule mark
+        // All are fields - x_min/x_max are created by transforms, y_min/y_max are computed
+        encoding.insert(
+            "x".to_string(),
+            json!({
+                "field": "x_min",
+                "type": "quantitative"
+            }),
+        );
+        encoding.insert(
+            "x2".to_string(),
+            json!({
+                "field": "x_max"
+            }),
+        );
+        encoding.insert(
+            "y".to_string(),
+            json!({
+                "field": "y_min",
+                "type": "quantitative"
+            }),
+        );
+        encoding.insert(
+            "y2".to_string(),
+            json!({
+                "field": "y_max"
+            }),
+        );
+
+        Ok(())
+    }
+
+    fn modify_spec(
+        &self,
+        layer_spec: &mut Value,
+        _layer: &Layer,
+        context: &RenderContext,
+    ) -> Result<()> {
+        // Field names for slope and intercept (with aesthetic column prefix)
+        let slope_field = naming::aesthetic_column("slope");
+        let intercept_field = naming::aesthetic_column("intercept");
+
+        // Get x extent from scale
+        let (x_min, x_max) = context.get_extent("x")?;
+
+        // Add transforms:
+        // 1. Create constant x_min/x_max fields
+        // 2. Compute y values at those x positions
+        let transforms = json!([
+            {
+                "calculate": x_min.to_string(),
+                "as": "x_min"
+            },
+            {
+                "calculate": x_max.to_string(),
+                "as": "x_max"
+            },
+            {
+                "calculate": format!("datum.{} * datum.x_min + datum.{}", slope_field, intercept_field),
+                "as": "y_min"
+            },
+            {
+                "calculate": format!("datum.{} * datum.x_max + datum.{}", slope_field, intercept_field),
+                "as": "y_max"
+            }
+        ]);
+
+        // Prepend to existing transforms (if any)
+        if let Some(existing) = layer_spec.get("transform") {
+            if let Some(arr) = existing.as_array() {
+                let mut new_transforms = transforms.as_array().unwrap().clone();
+                new_transforms.extend_from_slice(arr);
+                layer_spec["transform"] = json!(new_transforms);
+            }
+        } else {
+            layer_spec["transform"] = transforms;
+        }
+
         Ok(())
     }
 }
@@ -938,6 +1052,7 @@ pub fn get_renderer(geom: &Geom) -> Box<dyn GeomRenderer> {
         GeomType::Density => Box::new(AreaRenderer),
         GeomType::Violin => Box::new(ViolinRenderer),
         GeomType::Segment => Box::new(SegmentRenderer),
+        GeomType::AbLine => Box::new(ABLineRenderer),
         // All other geoms (Point, Line, Tile, etc.) use the default renderer
         _ => Box::new(DefaultRenderer),
     }
@@ -1131,5 +1246,196 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("no valid numeric range"));
+    }
+
+    #[test]
+    fn test_abline_renderer_multiple_lines() {
+        use crate::reader::{DuckDBReader, Reader};
+        use crate::writer::{VegaLiteWriter, Writer};
+
+        // Test that abline with 3 different slopes renders 3 separate lines
+        let query = r#"
+            WITH points AS (
+                SELECT * FROM (VALUES (0, 5), (5, 15), (10, 25)) AS t(x, y)
+            ),
+            lines AS (
+                SELECT * FROM (VALUES
+                    (2, 5, 'A'),
+                    (1, 10, 'B'),
+                    (3, 0, 'C')
+                ) AS t(slope, intercept, line_id)
+            )
+            SELECT * FROM points
+            VISUALISE
+            DRAW point MAPPING x AS x, y AS y
+            DRAW abline MAPPING slope AS slope, intercept AS intercept, line_id AS color FROM lines
+        "#;
+
+        // Execute query
+        let reader = DuckDBReader::from_connection_string("duckdb://memory")
+            .expect("Failed to create reader");
+        let spec = reader.execute(query).expect("Failed to execute query");
+
+        // Render to Vega-Lite
+        let writer = VegaLiteWriter::new();
+        let vl_json = writer.render(&spec).expect("Failed to render spec");
+
+        // Parse JSON
+        let vl_spec: serde_json::Value =
+            serde_json::from_str(&vl_json).expect("Failed to parse Vega-Lite JSON");
+
+        // Verify we have 2 layers (point + abline)
+        let layers = vl_spec["layer"].as_array().expect("No layers found");
+        assert_eq!(layers.len(), 2, "Should have 2 layers (point + abline)");
+
+        // Get the abline layer (second layer)
+        let abline_layer = &layers[1];
+
+        // Verify it's a rule mark
+        assert_eq!(
+            abline_layer["mark"]["type"],
+            "rule",
+            "ABLine should use rule mark"
+        );
+
+        // Verify transforms exist
+        let transforms = abline_layer["transform"]
+            .as_array()
+            .expect("No transforms found");
+
+        // Should have 4 calculate transforms + 1 filter = 5 total
+        assert_eq!(
+            transforms.len(),
+            5,
+            "Should have 5 transforms (x_min, x_max, y_min, y_max, filter)"
+        );
+
+        // Verify x_min/x_max transforms exist with consistent naming
+        let x_min_transform = transforms
+            .iter()
+            .find(|t| t["as"] == "x_min")
+            .expect("x_min transform not found");
+        let x_max_transform = transforms
+            .iter()
+            .find(|t| t["as"] == "x_max")
+            .expect("x_max transform not found");
+
+        assert!(
+            x_min_transform["calculate"].is_string(),
+            "x_min should have calculate expression"
+        );
+        assert!(
+            x_max_transform["calculate"].is_string(),
+            "x_max should have calculate expression"
+        );
+
+        // Verify y_min and y_max transforms use slope and intercept with x_min/x_max
+        let y_min_transform = transforms
+            .iter()
+            .find(|t| t["as"] == "y_min")
+            .expect("y_min transform not found");
+        let y_max_transform = transforms
+            .iter()
+            .find(|t| t["as"] == "y_max")
+            .expect("y_max transform not found");
+
+        let y_min_calc = y_min_transform["calculate"]
+            .as_str()
+            .expect("y_min calculate should be string");
+        let y_max_calc = y_max_transform["calculate"]
+            .as_str()
+            .expect("y_max calculate should be string");
+
+        // Should reference slope, intercept, and x_min/x_max
+        assert!(
+            y_min_calc.contains("__ggsql_aes_slope__"),
+            "y_min should reference slope"
+        );
+        assert!(
+            y_min_calc.contains("__ggsql_aes_intercept__"),
+            "y_min should reference intercept"
+        );
+        assert!(
+            y_min_calc.contains("datum.x_min"),
+            "y_min should reference datum.x_min"
+        );
+        assert!(
+            y_max_calc.contains("__ggsql_aes_slope__"),
+            "y_max should reference slope"
+        );
+        assert!(
+            y_max_calc.contains("__ggsql_aes_intercept__"),
+            "y_max should reference intercept"
+        );
+        assert!(
+            y_max_calc.contains("datum.x_max"),
+            "y_max should reference datum.x_max"
+        );
+
+        // Verify encoding has x, x2, y, y2 with consistent field names
+        let encoding = abline_layer["encoding"]
+            .as_object()
+            .expect("No encoding found");
+
+        assert!(encoding.contains_key("x"), "Should have x encoding");
+        assert!(encoding.contains_key("x2"), "Should have x2 encoding");
+        assert!(encoding.contains_key("y"), "Should have y encoding");
+        assert!(encoding.contains_key("y2"), "Should have y2 encoding");
+
+        // Verify consistent naming: x_min, x_max, y_min, y_max
+        assert_eq!(
+            encoding["x"]["field"], "x_min",
+            "x should reference x_min field"
+        );
+        assert_eq!(
+            encoding["x2"]["field"], "x_max",
+            "x2 should reference x_max field"
+        );
+        assert_eq!(
+            encoding["y"]["field"], "y_min",
+            "y should reference y_min field"
+        );
+        assert_eq!(
+            encoding["y2"]["field"], "y_max",
+            "y2 should reference y_max field"
+        );
+
+        // Verify stroke encoding exists for line_id (color aesthetic becomes stroke for rule mark)
+        assert!(
+            encoding.contains_key("stroke"),
+            "Should have stroke encoding for line_id"
+        );
+
+        // Verify data has 3 abline rows (one per slope)
+        let data_values = vl_spec["data"]["values"]
+            .as_array()
+            .expect("No data values found");
+
+        let abline_rows: Vec<_> = data_values
+            .iter()
+            .filter(|row| {
+                row["__ggsql_source__"] == "__ggsql_layer_1__"
+                    && row["__ggsql_aes_slope__"].is_number()
+            })
+            .collect();
+
+        assert_eq!(
+            abline_rows.len(),
+            3,
+            "Should have 3 abline rows (3 different slopes)"
+        );
+
+        // Verify we have slopes 1, 2, 3
+        let mut slopes: Vec<f64> = abline_rows
+            .iter()
+            .map(|row| row["__ggsql_aes_slope__"].as_f64().unwrap())
+            .collect();
+        slopes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        assert_eq!(
+            slopes,
+            vec![1.0, 2.0, 3.0],
+            "Should have slopes 1, 2, and 3"
+        );
     }
 }
