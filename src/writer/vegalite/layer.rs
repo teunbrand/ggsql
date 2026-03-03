@@ -42,7 +42,7 @@ pub fn geom_to_mark(geom: &Geom) -> Value {
         GeomType::Label => "text",
         GeomType::Segment => "rule",
         GeomType::Rule => "rule",
-        GeomType::AbLine => "rule",
+        GeomType::Linear => "rule",
         GeomType::ErrorBar => "rule",
         _ => "point", // Default fallback
     };
@@ -369,13 +369,13 @@ impl GeomRenderer for RuleRenderer {
 }
 
 // =============================================================================
-// ABLine Renderer
+// Linear Renderer
 // =============================================================================
 
-/// Renderer for abline geom - draws lines based on slope and intercept
-pub struct ABLineRenderer;
+/// Renderer for linear geom - draws lines based on coefficient and intercept
+pub struct LinearRenderer;
 
-impl GeomRenderer for ABLineRenderer {
+impl GeomRenderer for LinearRenderer {
     fn prepare_data(
         &self,
         df: &DataFrame,
@@ -395,8 +395,8 @@ impl GeomRenderer for ABLineRenderer {
         _layer: &Layer,
         _context: &RenderContext,
     ) -> Result<()> {
-        // Remove slope and intercept from encoding - they're only used in transforms
-        encoding.remove("slope");
+        // Remove coefficient and intercept from encoding - they're only used in transforms
+        encoding.remove("coef");
         encoding.remove("intercept");
 
         // Add x/x2/y/y2 encodings for rule mark
@@ -437,8 +437,8 @@ impl GeomRenderer for ABLineRenderer {
         _layer: &Layer,
         context: &RenderContext,
     ) -> Result<()> {
-        // Field names for slope and intercept (with aesthetic column prefix)
-        let slope_field = naming::aesthetic_column("slope");
+        // Field names for coef and intercept (with aesthetic column prefix)
+        let coef_field = naming::aesthetic_column("coef");
         let intercept_field = naming::aesthetic_column("intercept");
 
         // Get x extent from scale (use pos1, the internal name for the first positional aesthetic)
@@ -457,11 +457,11 @@ impl GeomRenderer for ABLineRenderer {
                 "as": "x_max"
             },
             {
-                "calculate": format!("datum.{} * datum.x_min + datum.{}", slope_field, intercept_field),
+                "calculate": format!("datum.{} * datum.x_min + datum.{}", coef_field, intercept_field),
                 "as": "y_min"
             },
             {
-                "calculate": format!("datum.{} * datum.x_max + datum.{}", slope_field, intercept_field),
+                "calculate": format!("datum.{} * datum.x_max + datum.{}", coef_field, intercept_field),
                 "as": "y_max"
             }
         ]);
@@ -1189,7 +1189,7 @@ pub fn get_renderer(geom: &Geom) -> Box<dyn GeomRenderer> {
         GeomType::Density => Box::new(AreaRenderer),
         GeomType::Violin => Box::new(ViolinRenderer),
         GeomType::Segment => Box::new(SegmentRenderer),
-        GeomType::AbLine => Box::new(ABLineRenderer),
+        GeomType::Linear => Box::new(LinearRenderer),
         GeomType::ErrorBar => Box::new(ErrorBarRenderer),
         GeomType::Rule => Box::new(RuleRenderer),
         // All other geoms (Point, Line, Tile, etc.) use the default renderer
@@ -1388,11 +1388,11 @@ mod tests {
     }
 
     #[test]
-    fn test_abline_renderer_multiple_lines() {
+    fn test_linear_renderer_multiple_lines() {
         use crate::reader::{DuckDBReader, Reader};
         use crate::writer::{VegaLiteWriter, Writer};
 
-        // Test that abline with 3 different slopes renders 3 separate lines
+        // Test that linear with 3 different coefficients renders 3 separate lines
         let query = r#"
             WITH points AS (
                 SELECT * FROM (VALUES (0, 5), (5, 15), (10, 25)) AS t(x, y)
@@ -1402,12 +1402,12 @@ mod tests {
                     (2, 5, 'A'),
                     (1, 10, 'B'),
                     (3, 0, 'C')
-                ) AS t(slope, intercept, line_id)
+                ) AS t(coef, intercept, line_id)
             )
             SELECT * FROM points
             VISUALISE
             DRAW point MAPPING x AS x, y AS y
-            DRAW abline MAPPING slope AS slope, intercept AS intercept, line_id AS color FROM lines
+            DRAW linear MAPPING coef AS coef, intercept AS intercept, line_id AS color FROM lines
         "#;
 
         // Execute query
@@ -1423,21 +1423,21 @@ mod tests {
         let vl_spec: serde_json::Value =
             serde_json::from_str(&vl_json).expect("Failed to parse Vega-Lite JSON");
 
-        // Verify we have 2 layers (point + abline)
+        // Verify we have 2 layers (point + linear)
         let layers = vl_spec["layer"].as_array().expect("No layers found");
-        assert_eq!(layers.len(), 2, "Should have 2 layers (point + abline)");
+        assert_eq!(layers.len(), 2, "Should have 2 layers (point + linear)");
 
-        // Get the abline layer (second layer)
-        let abline_layer = &layers[1];
+        // Get the linear layer (second layer)
+        let linear_layer = &layers[1];
 
         // Verify it's a rule mark
         assert_eq!(
-            abline_layer["mark"]["type"], "rule",
-            "ABLine should use rule mark"
+            linear_layer["mark"]["type"], "rule",
+            "Linear should use rule mark"
         );
 
         // Verify transforms exist
-        let transforms = abline_layer["transform"]
+        let transforms = linear_layer["transform"]
             .as_array()
             .expect("No transforms found");
 
@@ -1467,7 +1467,7 @@ mod tests {
             "x_max should have calculate expression"
         );
 
-        // Verify y_min and y_max transforms use slope and intercept with x_min/x_max
+        // Verify y_min and y_max transforms use coef and intercept with x_min/x_max
         let y_min_transform = transforms
             .iter()
             .find(|t| t["as"] == "y_min")
@@ -1484,10 +1484,10 @@ mod tests {
             .as_str()
             .expect("y_max calculate should be string");
 
-        // Should reference slope, intercept, and x_min/x_max
+        // Should reference coef, intercept, and x_min/x_max
         assert!(
-            y_min_calc.contains("__ggsql_aes_slope__"),
-            "y_min should reference slope"
+            y_min_calc.contains("__ggsql_aes_coef__"),
+            "y_min should reference coef"
         );
         assert!(
             y_min_calc.contains("__ggsql_aes_intercept__"),
@@ -1498,8 +1498,8 @@ mod tests {
             "y_min should reference datum.x_min"
         );
         assert!(
-            y_max_calc.contains("__ggsql_aes_slope__"),
-            "y_max should reference slope"
+            y_max_calc.contains("__ggsql_aes_coef__"),
+            "y_max should reference coef"
         );
         assert!(
             y_max_calc.contains("__ggsql_aes_intercept__"),
@@ -1511,7 +1511,7 @@ mod tests {
         );
 
         // Verify encoding has x, x2, y, y2 with consistent field names
-        let encoding = abline_layer["encoding"]
+        let encoding = linear_layer["encoding"]
             .as_object()
             .expect("No encoding found");
 
@@ -1544,37 +1544,33 @@ mod tests {
             "Should have stroke encoding for line_id"
         );
 
-        // Verify data has 3 abline rows (one per slope)
+        // Verify data has 3 linear rows (one per coef)
         let data_values = vl_spec["data"]["values"]
             .as_array()
             .expect("No data values found");
 
-        let abline_rows: Vec<_> = data_values
+        let linear_rows: Vec<_> = data_values
             .iter()
             .filter(|row| {
                 row["__ggsql_source__"] == "__ggsql_layer_1__"
-                    && row["__ggsql_aes_slope__"].is_number()
+                    && row["__ggsql_aes_coef__"].is_number()
             })
             .collect();
 
         assert_eq!(
-            abline_rows.len(),
+            linear_rows.len(),
             3,
-            "Should have 3 abline rows (3 different slopes)"
+            "Should have 3 linear rows (3 different coefficients)"
         );
 
-        // Verify we have slopes 1, 2, 3
-        let mut slopes: Vec<f64> = abline_rows
+        // Verify we have coefs 1, 2, 3
+        let mut coefs: Vec<f64> = linear_rows
             .iter()
-            .map(|row| row["__ggsql_aes_slope__"].as_f64().unwrap())
+            .map(|row| row["__ggsql_aes_coef__"].as_f64().unwrap())
             .collect();
-        slopes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        coefs.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        assert_eq!(
-            slopes,
-            vec![1.0, 2.0, 3.0],
-            "Should have slopes 1, 2, and 3"
-        );
+        assert_eq!(coefs, vec![1.0, 2.0, 3.0], "Should have coefs 1, 2, and 3");
     }
 
     #[test]

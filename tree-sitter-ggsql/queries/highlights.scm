@@ -25,7 +25,7 @@
   "segment"
   "arrow"
   "rule"
-  "abline"
+  "linear"
   "errorbar"
 ] @type.builtin
 

@@ -19,7 +19,7 @@ There are many different layers to choose from when visualising your data. Some 
 - [`line`](layer/line.qmd) is used to produce lineplots with the data sorted along the x axis.
 - [`path`](layer/path.qmd) is like `line` above but does not sort the data but plot it according to its own order.
 - [`segment`](layer/segment.qmd) connects two points with a line segment.
-- [`abline`](layer/abline.qmd) draws a long line parameterised by slope and intercept.
+- [`linear`](layer/linear.qmd) draws a long line parameterised by a coefficient and intercept.
 - [`rule`](layer/rule.qmd) draws horizontal and vertical reference lines.
 - [`area`](layer/area.qmd) is used to display series as an area chart.
 - [`ribbon`](layer/ribbon.qmd) is used to display series extrema.

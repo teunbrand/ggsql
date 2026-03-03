@@ -28,7 +28,6 @@ use std::sync::Arc;
 pub mod types;
 
 // Geom implementations
-mod abline;
 mod area;
 mod arrow;
 mod bar;
@@ -38,6 +37,7 @@ mod errorbar;
 mod histogram;
 mod label;
 mod line;
+mod linear;
 mod path;
 mod point;
 mod polygon;
@@ -53,7 +53,6 @@ mod violin;
 pub use types::{DefaultAesthetics, DefaultParam, DefaultParamValue, StatResult};
 
 // Re-export geom structs for direct access if needed
-pub use abline::AbLine;
 pub use area::Area;
 pub use arrow::Arrow;
 pub use bar::Bar;
@@ -63,6 +62,7 @@ pub use errorbar::ErrorBar;
 pub use histogram::Histogram;
 pub use label::Label;
 pub use line::Line;
+pub use linear::Linear;
 pub use path::Path;
 pub use point::Point;
 pub use polygon::Polygon;
@@ -98,7 +98,7 @@ pub enum GeomType {
     Segment,
     Arrow,
     Rule,
-    AbLine,
+    Linear,
     ErrorBar,
 }
 
@@ -123,7 +123,7 @@ impl std::fmt::Display for GeomType {
             GeomType::Segment => "segment",
             GeomType::Arrow => "arrow",
             GeomType::Rule => "rule",
-            GeomType::AbLine => "abline",
+            GeomType::Linear => "linear",
             GeomType::ErrorBar => "errorbar",
         };
         write!(f, "{}", s)
@@ -312,9 +312,9 @@ impl Geom {
         Self(Arc::new(Rule))
     }
 
-    /// Create an AbLine geom
-    pub fn abline() -> Self {
-        Self(Arc::new(AbLine))
+    /// Create an Linear geom
+    pub fn linear() -> Self {
+        Self(Arc::new(Linear))
     }
 
     /// Create an ErrorBar geom
@@ -343,7 +343,7 @@ impl Geom {
             GeomType::Segment => Self::segment(),
             GeomType::Arrow => Self::arrow(),
             GeomType::Rule => Self::rule(),
-            GeomType::AbLine => Self::abline(),
+            GeomType::Linear => Self::linear(),
             GeomType::ErrorBar => Self::errorbar(),
         }
     }

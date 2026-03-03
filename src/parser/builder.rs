@@ -596,7 +596,7 @@ fn parse_geom_type(text: &str) -> Result<Geom> {
         "segment" => Ok(Geom::segment()),
         "arrow" => Ok(Geom::arrow()),
         "rule" => Ok(Geom::rule()),
-        "abline" => Ok(Geom::abline()),
+        "linear" => Ok(Geom::linear()),
         "errorbar" => Ok(Geom::errorbar()),
         _ => Err(GgsqlError::ParseError(format!(
             "Unknown geom type: {}",

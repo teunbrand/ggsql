@@ -142,7 +142,7 @@
       <item>segment</item>
       <item>arrow</item>
       <item>rule</item>
-      <item>abline</item>
+      <item>linear</item>
       <item>errorbar</item>
     </list>
 

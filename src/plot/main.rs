@@ -510,8 +510,8 @@ mod tests {
 
         // Reference lines
         assert_eq!(
-            Geom::abline().aesthetics().required(),
-            &["slope", "intercept"]
+            Geom::linear().aesthetics().required(),
+            &["coef", "intercept"]
         );
 
         // ErrorBar has no strict requirements
