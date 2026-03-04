@@ -101,6 +101,70 @@ impl std::fmt::Display for Rect {
     }
 }
 
+/// Process a single direction (x or y) for rect stat transform
+/// Returns (select_parts, stat_column_names)
+fn process_direction(
+    axis: &str,
+    aesthetics: &Mappings,
+    parameters: &HashMap<String, ParameterValue>,
+    schema: &Schema,
+) -> Result<(Vec<String>, Vec<String>)> {
+    // Derive aesthetic names from axis
+    let (center_aes, min_aes, max_aes, size_aes) = match axis {
+        "x" => ("pos1", "pos1min", "pos1max", "width"),
+        "y" => ("pos2", "pos2min", "pos2max", "height"),
+        _ => unreachable!("axis must be 'x' or 'y'"),
+    };
+
+    // Get column names from MAPPING, with SETTING fallback for size
+    let center = get_column_name(aesthetics, center_aes);
+    let min = get_column_name(aesthetics, min_aes);
+    let max = get_column_name(aesthetics, max_aes);
+    let size = get_column_name(aesthetics, size_aes)
+        .or_else(|| parameters.get(size_aes).map(|v| v.to_string()));
+
+    // Detect if discrete by checking schema
+    let is_discrete = center
+        .as_ref()
+        .and_then(|col| schema.iter().find(|c| &c.name == col))
+        .map(|c| c.is_discrete)
+        .unwrap_or(false);
+
+    // Generate position expressions
+    let (expr_1, expr_2) = if is_discrete {
+        generate_discrete_position_expressions(
+            center.as_deref(),
+            min.as_deref(),
+            max.as_deref(),
+            size.as_deref(),
+            axis,
+        )?
+    } else {
+        generate_continuous_position_expressions(
+            center.as_deref(),
+            min.as_deref(),
+            max.as_deref(),
+            size.as_deref(),
+            axis,
+        )?
+    };
+
+    // Determine stat column names based on discrete vs continuous
+    let stat_cols = if is_discrete {
+        vec![center_aes.to_string(), size_aes.to_string()]
+    } else {
+        vec![min_aes.to_string(), max_aes.to_string()]
+    };
+
+    // Build SELECT parts using the stat columns
+    let select_parts = vec![
+        format!("{} AS {}", expr_1, naming::stat_column(&stat_cols[0])),
+        format!("{} AS {}", expr_2, naming::stat_column(&stat_cols[1])),
+    ];
+
+    Ok((select_parts, stat_cols))
+}
+
 /// Statistical transformation for rect: consolidate parameters and compute min/max
 fn stat_rect(
     query: &str,
@@ -109,75 +173,13 @@ fn stat_rect(
     _group_by: &[String],
     parameters: &HashMap<String, ParameterValue>,
 ) -> Result<StatResult> {
-    // Get aesthetic column names for SQL (at stat time, all aesthetics are columns)
-    let x = get_column_name(aesthetics, "pos1");
-    let xmin = get_column_name(aesthetics, "pos1min");
-    let xmax = get_column_name(aesthetics, "pos1max");
-    // Prefer MAPPING width, fallback to SETTING width (as SQL literal)
-    // Precedence: MAPPING > SETTING > default (default handled in position expressions)
-    let width = get_column_name(aesthetics, "width")
-        .or_else(|| parameters.get("width").map(|v| v.to_string()));
+    // Process X direction
+    let (x_select, x_stat_cols) = process_direction("x", aesthetics, parameters, schema)?;
 
-    let y = get_column_name(aesthetics, "pos2");
-    let ymin = get_column_name(aesthetics, "pos2min");
-    let ymax = get_column_name(aesthetics, "pos2max");
-    // Prefer MAPPING height, fallback to SETTING height (as SQL literal)
-    let height = get_column_name(aesthetics, "height")
-        .or_else(|| parameters.get("height").map(|v| v.to_string()));
-
-    // Detect if x and y are discrete by checking schema
-    let is_x_discrete = x
-        .as_ref()
-        .and_then(|col| schema.iter().find(|c| &c.name == col))
-        .map(|c| c.is_discrete)
-        .unwrap_or(false);
-    let is_y_discrete = y
-        .as_ref()
-        .and_then(|col| schema.iter().find(|c| &c.name == col))
-        .map(|c| c.is_discrete)
-        .unwrap_or(false);
-
-    // Generate SQL expressions based on parameter combinations
-    // For discrete: returns (center, size) where size defaults to 1.0
-    // For continuous: returns (min_expr, max_expr)
-    let (x_expr_1, x_expr_2) = if is_x_discrete {
-        generate_discrete_position_expressions(
-            x.as_deref(),
-            xmin.as_deref(),
-            xmax.as_deref(),
-            width.as_deref(),
-            "x",
-        )?
-    } else {
-        generate_continuous_position_expressions(
-            x.as_deref(),
-            xmin.as_deref(),
-            xmax.as_deref(),
-            width.as_deref(),
-            "x",
-        )?
-    };
-    let (y_expr_1, y_expr_2) = if is_y_discrete {
-        generate_discrete_position_expressions(
-            y.as_deref(),
-            ymin.as_deref(),
-            ymax.as_deref(),
-            height.as_deref(),
-            "y",
-        )?
-    } else {
-        generate_continuous_position_expressions(
-            y.as_deref(),
-            ymin.as_deref(),
-            ymax.as_deref(),
-            height.as_deref(),
-            "y",
-        )?
-    };
+    // Process Y direction
+    let (y_select, y_stat_cols) = process_direction("y", aesthetics, parameters, schema)?;
 
     // Define consumed aesthetics (these will be transformed, not passed through)
-    // This list determines both what columns to exclude from pass-through
-    // and what to report in StatResult.consumed_aesthetics
     let consumed_aesthetic_names = ["pos1", "pos1min", "pos1max", "width", "pos2", "pos2min", "pos2max", "height"];
 
     // Convert aesthetic names to column names for filtering
@@ -186,62 +188,20 @@ fn stat_rect(
         .filter_map(|aes| get_column_name(aesthetics, aes))
         .collect();
 
-    // Build SELECT list and stat_columns based on discrete vs continuous
-    let mut select_parts = vec![];
-    let mut stat_columns = vec![];
+    // Build SELECT list starting with non-consumed columns
+    let mut select_parts: Vec<String> = schema
+        .iter()
+        .filter(|col| !consumed_columns.contains(&col.name))
+        .map(|col| col.name.clone())
+        .collect();
 
-    // Add non-consumed columns from schema (pass through all non-positional aesthetics)
-    for col_info in schema {
-        if !consumed_columns.contains(&col_info.name) {
-            select_parts.push(col_info.name.clone());
-        }
-    }
+    // Add X direction SELECT parts and collect stat columns
+    select_parts.extend(x_select);
+    let mut stat_columns = x_stat_cols;
 
-    // X direction
-    if is_x_discrete {
-        // x_expr_1 is center, x_expr_2 is width (defaults to 1.0)
-        select_parts.push(format!("{} AS {}", x_expr_1, naming::stat_column("pos1")));
-        select_parts.push(format!("{} AS {}", x_expr_2, naming::stat_column("width")));
-        stat_columns.push("pos1".to_string());
-        stat_columns.push("width".to_string());
-    } else {
-        // x_expr_1 is min, x_expr_2 is max
-        select_parts.push(format!(
-            "{} AS {}",
-            x_expr_1,
-            naming::stat_column("pos1min")
-        ));
-        select_parts.push(format!(
-            "{} AS {}",
-            x_expr_2,
-            naming::stat_column("pos1max")
-        ));
-        stat_columns.push("pos1min".to_string());
-        stat_columns.push("pos1max".to_string());
-    }
-
-    // Y direction
-    if is_y_discrete {
-        // y_expr_1 is center, y_expr_2 is height (defaults to 1.0)
-        select_parts.push(format!("{} AS {}", y_expr_1, naming::stat_column("pos2")));
-        select_parts.push(format!("{} AS {}", y_expr_2, naming::stat_column("height")));
-        stat_columns.push("pos2".to_string());
-        stat_columns.push("height".to_string());
-    } else {
-        // y_expr_1 is min, y_expr_2 is max
-        select_parts.push(format!(
-            "{} AS {}",
-            y_expr_1,
-            naming::stat_column("pos2min")
-        ));
-        select_parts.push(format!(
-            "{} AS {}",
-            y_expr_2,
-            naming::stat_column("pos2max")
-        ));
-        stat_columns.push("pos2min".to_string());
-        stat_columns.push("pos2max".to_string());
-    }
+    // Add Y direction SELECT parts and collect stat columns
+    select_parts.extend(y_select);
+    stat_columns.extend(y_stat_cols);
 
     let select_list = select_parts.join(", ");
 
