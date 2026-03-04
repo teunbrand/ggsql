@@ -107,18 +107,23 @@ fn stat_rect(
     schema: &Schema,
     aesthetics: &Mappings,
     _group_by: &[String],
-    _parameters: &HashMap<String, ParameterValue>,
+    parameters: &HashMap<String, ParameterValue>,
 ) -> Result<StatResult> {
     // Get aesthetic column names for SQL (at stat time, all aesthetics are columns)
     let x = get_column_name(aesthetics, "pos1");
     let xmin = get_column_name(aesthetics, "pos1min");
     let xmax = get_column_name(aesthetics, "pos1max");
-    let width = get_column_name(aesthetics, "width");
+    // Prefer MAPPING width, fallback to SETTING width (as SQL literal)
+    // Precedence: MAPPING > SETTING > default (default handled in position expressions)
+    let width = get_column_name(aesthetics, "width")
+        .or_else(|| parameters.get("width").map(|v| v.to_string()));
 
     let y = get_column_name(aesthetics, "pos2");
     let ymin = get_column_name(aesthetics, "pos2min");
     let ymax = get_column_name(aesthetics, "pos2max");
-    let height = get_column_name(aesthetics, "height");
+    // Prefer MAPPING height, fallback to SETTING height (as SQL literal)
+    let height = get_column_name(aesthetics, "height")
+        .or_else(|| parameters.get("height").map(|v| v.to_string()));
 
     // Detect if x and y are discrete by checking schema
     let is_x_discrete = x
@@ -897,6 +902,32 @@ mod tests {
             // They should only appear as stat columns
             assert!(query.contains("__ggsql_aes_width__ AS __ggsql_stat_width"));
             assert!(query.contains("__ggsql_aes_height__ AS __ggsql_stat_height"));
+        }
+    }
+
+    #[test]
+    fn test_setting_width_as_fallback() {
+        // Test that SETTING width/height are used when no MAPPING is provided
+        let aesthetics = create_aesthetics(&["pos1", "pos2"]);
+        let schema = create_schema(&["pos1", "pos2"]);
+        let group_by = vec![];
+        let mut parameters = HashMap::new();
+        parameters.insert("width".to_string(), ParameterValue::Number(0.7));
+        parameters.insert("height".to_string(), ParameterValue::Number(0.9));
+
+        let result = stat_rect(
+            "SELECT * FROM data",
+            &schema,
+            &aesthetics,
+            &group_by,
+            &parameters,
+        );
+        assert!(result.is_ok());
+
+        if let Ok(StatResult::Transformed { query, .. }) = result {
+            // Should use SETTING values as SQL literals
+            assert!(query.contains("0.7 AS __ggsql_stat_width"));
+            assert!(query.contains("0.9 AS __ggsql_stat_height"));
         }
     }
 }
