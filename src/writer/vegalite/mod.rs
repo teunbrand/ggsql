@@ -1353,11 +1353,11 @@ mod tests {
         let mut spec = Plot::new();
         let layer = Layer::new(Geom::text())
             .with_aesthetic(
-                "x".to_string(),
+                "pos1".to_string(),
                 AestheticValue::standard_column("x".to_string()),
             )
             .with_aesthetic(
-                "y".to_string(),
+                "pos2".to_string(),
                 AestheticValue::standard_column("y".to_string()),
             )
             .with_aesthetic(
