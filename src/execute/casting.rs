@@ -37,6 +37,7 @@ pub fn literal_to_sql(lit: &ParameterValue) -> String {
         ParameterValue::Array(arr) => {
             // Generate CASE WHEN statement to select array element by row number
             // The annotation layer dummy table has __ggsql_dummy__ column with values 1, 2, 3, ...
+            // Arrays are homogeneous (homogenized in recycle_value_to_length), so no type mixing
             let mut case_stmt = String::from("CASE __ggsql_dummy__");
             for (i, elem) in arr.iter().enumerate() {
                 let row_num = i + 1; // Row numbers start at 1

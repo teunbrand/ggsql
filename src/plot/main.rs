@@ -75,8 +75,12 @@ fn recycle_value_to_length(
         ParameterValue::Null => Ok(ParameterValue::Array(
             vec![ArrayElement::Null; target_length],
         )),
-        // Arrays: recycle if length 1, return unchanged if matches target, error otherwise
+        // Arrays: homogenize types if mixed, then recycle if needed
         ParameterValue::Array(arr) => {
+            // Homogenize array if it has mixed incompatible types
+            let arr = ArrayElement::homogenize(&arr);
+
+            // Now handle recycling
             if arr.len() == 1 {
                 // Recycle the single element
                 let element = arr[0].clone();
@@ -297,16 +301,20 @@ impl Plot {
                 }
             }
 
-            // Step 2: Move required/positional aesthetics to mappings with recycling
+            // Step 2: Move required/positional/array aesthetics to mappings with recycling
             let required_aesthetics = layer.geom.aesthetics().required();
             let param_keys: Vec<String> = layer.parameters.keys().cloned().collect();
 
             for param_name in param_keys {
-                // Check if this is a positional aesthetic OR a required aesthetic
+                // Check if this is a positional aesthetic OR a required aesthetic OR an array
                 let is_positional = crate::plot::aesthetic::is_positional_aesthetic(&param_name);
                 let is_required = required_aesthetics.contains(&param_name.as_str());
+                let is_array = matches!(
+                    layer.parameters.get(&param_name),
+                    Some(ParameterValue::Array(_))
+                );
 
-                if is_positional || is_required {
+                if is_positional || is_required || is_array {
                     // Skip if already in mappings
                     if layer.mappings.contains_key(&param_name) {
                         continue;

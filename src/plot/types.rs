@@ -618,6 +618,34 @@ impl ArrayElement {
         }
     }
 
+    /// Homogenize a slice of array elements to a common type.
+    ///
+    /// Infers the target type from all elements, then attempts to coerce all elements
+    /// to that type. If coercion fails (e.g., string + number), falls back to String type.
+    ///
+    /// Returns a new vector with homogenized elements.
+    pub fn homogenize(values: &[Self]) -> Vec<Self> {
+        // Infer target type from all elements
+        let Some(target_type) = Self::infer_type(values) else {
+            // All nulls or empty array - return cloned as-is
+            return values.to_vec();
+        };
+
+        // Try to coerce all elements to the inferred type
+        let coerced: Result<Vec<_>, _> = values.iter().map(|elem| elem.coerce_to(target_type)).collect();
+
+        match coerced {
+            Ok(coerced_arr) => coerced_arr,
+            Err(_) => {
+                // Coercion failed - fall back to String type
+                values
+                    .iter()
+                    .map(|elem| elem.coerce_to(ArrayElementType::String).unwrap_or(Self::Null))
+                    .collect()
+            }
+        }
+    }
+
     /// Get the type name for error messages.
     fn type_name(&self) -> &'static str {
         match self {
@@ -1374,5 +1402,27 @@ mod tests {
         let elem = ArrayElement::DateTime(100000);
         let result = elem.coerce_to(ArrayElementType::Date);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_homogenize_mixed_number_string() {
+        let arr = vec![
+            ArrayElement::Number(1.0),
+            ArrayElement::String("foo".to_string()),
+        ];
+
+        let homogenized = ArrayElement::homogenize(&arr);
+
+        // Should fall back to String type since "foo" can't be coerced to Number
+        assert_eq!(homogenized.len(), 2);
+        assert!(matches!(homogenized[0], ArrayElement::String(_)));
+        assert!(matches!(homogenized[1], ArrayElement::String(_)));
+
+        if let ArrayElement::String(s) = &homogenized[0] {
+            assert_eq!(s, "1");
+        }
+        if let ArrayElement::String(s) = &homogenized[1] {
+            assert_eq!(s, "foo");
+        }
     }
 }
