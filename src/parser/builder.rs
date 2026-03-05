@@ -295,7 +295,8 @@ fn build_visualise_statement(node: &Node, source: &SourceTree) -> Result<Plot> {
 
     // Process annotation layers: move positional/required parameters to mappings
     // This must happen AFTER transform_aesthetics_to_internal() so parameter keys are in internal space
-    spec.process_annotation_layers();
+    // Returns error if arrays have mismatched lengths
+    spec.process_annotation_layers()?;
 
     Ok(spec)
 }

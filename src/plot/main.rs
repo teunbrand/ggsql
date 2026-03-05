@@ -47,6 +47,59 @@ pub use super::projection::{Coord, Projection};
 // Re-export Facet types from the facet module
 pub use super::facet::{Facet, FacetLayout};
 
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Recycle a scalar or length-1 array to a target length.
+///
+/// Recycling rules:
+/// - Scalar values (Number, String, Boolean) → Array with n copies as ArrayElements
+/// - Length-1 arrays → Expand to n copies of the single element
+/// - Length-n arrays → Return unchanged if n matches target, error otherwise
+fn recycle_value_to_length(
+    value: ParameterValue,
+    target_length: usize,
+) -> Result<ParameterValue, crate::GgsqlError> {
+    match value {
+        // Scalars: convert to array with n copies as ArrayElements
+        ParameterValue::Number(n) => Ok(ParameterValue::Array(
+            vec![ArrayElement::Number(n); target_length],
+        )),
+        ParameterValue::String(s) => Ok(ParameterValue::Array(
+            vec![ArrayElement::String(s); target_length],
+        )),
+        ParameterValue::Boolean(b) => Ok(ParameterValue::Array(
+            vec![ArrayElement::Boolean(b); target_length],
+        )),
+        ParameterValue::Null => Ok(ParameterValue::Array(
+            vec![ArrayElement::Null; target_length],
+        )),
+        // Arrays: recycle if length 1, return unchanged if matches target, error otherwise
+        ParameterValue::Array(arr) => {
+            if arr.len() == 1 {
+                // Recycle the single element
+                let element = arr[0].clone();
+                Ok(ParameterValue::Array(vec![element; target_length]))
+            } else if arr.len() == target_length {
+                // Already correct length
+                Ok(ParameterValue::Array(arr))
+            } else {
+                // Mismatched length - shouldn't happen if validation passed
+                Err(crate::GgsqlError::InternalError(format!(
+                    "Attempted to recycle array of length {} to length {} (should have been caught earlier)",
+                    arr.len(),
+                    target_length
+                )))
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Plot Type
+// =============================================================================
+
 /// Complete ggsql visualization specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plot {
@@ -202,22 +255,50 @@ impl Plot {
     }
 
     /// Process annotation layers by moving positional and required aesthetics
-    /// from parameters to mappings.
+    /// from parameters to mappings, with array recycling support.
     ///
     /// This must be called AFTER transform_aesthetics_to_internal() so that
     /// parameter keys are already in internal space (pos1, pos2, etc.).
     ///
+    /// Array recycling rules:
+    /// - Scalars and length-1 arrays are recycled to match the max array length
+    /// - All non-1 arrays must have the same length (error on mismatch)
+    /// - Only required/positional aesthetics that are moved to mappings get recycled
+    ///
     /// Positional aesthetics need to be in mappings so they go through the same
     /// transformation pipeline (internal→user space) as data-mapped aesthetics,
     /// enabling them to participate in scale training and coordinate transformations.
-    pub fn process_annotation_layers(&mut self) {
+    pub fn process_annotation_layers(&mut self) -> Result<(), crate::GgsqlError> {
         for layer in &mut self.layers {
-            if !matches!(layer.source, Some(crate::DataSource::Annotation(_))) {
-                continue;
+            // Get initial length from DataSource
+            let mut max_length = match &layer.source {
+                Some(DataSource::Annotation(n)) => *n,
+                _ => continue,
+            };
+
+            // Step 1: Determine max array length from all parameters
+            let mut array_lengths: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+
+            for (param_name, value) in &layer.parameters {
+                if let ParameterValue::Array(arr) = value {
+                    let len = arr.len();
+                    array_lengths.insert(param_name.clone(), len);
+                    if len > 1 && len != max_length {
+                        if max_length > 1 {
+                            // Multiple different non-1 lengths - error
+                            return Err(crate::GgsqlError::ValidationError(format!(
+                                "PLACE annotation layer has mismatched array lengths: '{}' has length {}, but another has length {}",
+                                param_name, len, max_length
+                            )));
+                        }
+                        max_length = len;
+                    }
+                }
             }
 
+            // Step 2: Move required/positional aesthetics to mappings with recycling
             let required_aesthetics = layer.geom.aesthetics().required();
-            // Collect parameter keys first to avoid borrow checker issues
             let param_keys: Vec<String> = layer.parameters.keys().cloned().collect();
 
             for param_name in param_keys {
@@ -231,15 +312,28 @@ impl Plot {
                         continue;
                     }
 
-                    // Move from parameters to mappings (both now use internal names)
+                    // Move from parameters to mappings with recycling
                     if let Some(value) = layer.parameters.remove(&param_name) {
+                        let recycled_value = if max_length > 1 {
+                            recycle_value_to_length(value, max_length)?
+                        } else {
+                            value
+                        };
+
                         layer
                             .mappings
-                            .insert(&param_name, crate::AestheticValue::Literal(value));
+                            .insert(&param_name, AestheticValue::Literal(recycled_value));
                     }
                 }
             }
+
+            // Step 3: Update DataSource with the correct length
+            if max_length > 1 {
+                layer.source = Some(DataSource::Annotation(max_length));
+            }
         }
+
+        Ok(())
     }
 
     /// Check if the spec has any layers

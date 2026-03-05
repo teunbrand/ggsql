@@ -4,7 +4,7 @@
 //! scale requirements and updating type info accordingly.
 
 use crate::plot::scale::coerce_dtypes;
-use crate::plot::{CastTargetType, Layer, ParameterValue, Plot, SqlTypeNames};
+use crate::plot::{ArrayElement, CastTargetType, Layer, ParameterValue, Plot, SqlTypeNames};
 use crate::{naming, DataSource};
 use polars::prelude::{DataType, TimeUnit};
 use std::collections::{HashMap, HashSet};
@@ -34,9 +34,44 @@ pub fn literal_to_sql(lit: &ParameterValue) -> String {
                 "FALSE".to_string()
             }
         }
-        ParameterValue::Array(_) | ParameterValue::Null => {
-            unreachable!("Grammar prevents arrays and null in literal aesthetic mappings")
+        ParameterValue::Array(arr) => {
+            // Generate CASE WHEN statement to select array element by row number
+            // The annotation layer dummy table has __ggsql_dummy__ column with values 1, 2, 3, ...
+            let mut case_stmt = String::from("CASE __ggsql_dummy__");
+            for (i, elem) in arr.iter().enumerate() {
+                let row_num = i + 1; // Row numbers start at 1
+                let value_sql = match elem {
+                    ArrayElement::String(s) => format!("'{}'", s.replace('\'', "''")),
+                    ArrayElement::Number(n) => n.to_string(),
+                    ArrayElement::Boolean(b) => {
+                        if *b {
+                            "TRUE".to_string()
+                        } else {
+                            "FALSE".to_string()
+                        }
+                    }
+                    ArrayElement::Date(d) => {
+                        // Convert days since epoch to DATE
+                        format!("DATE '1970-01-01' + INTERVAL {} DAY", d)
+                    }
+                    ArrayElement::DateTime(dt) => {
+                        // Convert microseconds since epoch to TIMESTAMP
+                        format!("TIMESTAMP '1970-01-01 00:00:00' + INTERVAL {} MICROSECOND", dt)
+                    }
+                    ArrayElement::Time(t) => {
+                        // Convert nanoseconds since midnight to TIME
+                        let seconds = t / 1_000_000_000;
+                        let nanos = t % 1_000_000_000;
+                        format!("TIME '00:00:00' + INTERVAL {} SECOND + INTERVAL {} NANOSECOND", seconds, nanos)
+                    }
+                    ArrayElement::Null => "NULL".to_string(),
+                };
+                case_stmt.push_str(&format!(" WHEN {} THEN {}", row_num, value_sql));
+            }
+            case_stmt.push_str(" END");
+            case_stmt
         }
+        ParameterValue::Null => "NULL".to_string(),
     }
 }
 
@@ -232,9 +267,9 @@ pub fn determine_layer_source(
             if *n == 1 {
                 "(SELECT 1 AS __ggsql_dummy__)".to_string()
             } else {
-                // Generate VALUES clause with n rows: VALUES (1), (2), ..., (n)
+                // Generate VALUES clause with n rows: (VALUES (1), (2), ..., (n)) AS t(col)
                 let rows: Vec<String> = (1..=*n).map(|i| format!("({})", i)).collect();
-                format!("(VALUES {} AS t(__ggsql_dummy__))", rows.join(", "))
+                format!("(SELECT * FROM (VALUES {}) AS t(__ggsql_dummy__))", rows.join(", "))
             }
         }
         None => {
