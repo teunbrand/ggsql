@@ -96,7 +96,7 @@ pub fn build_layer_select_list(
     for (aesthetic, value) in &layer.mappings.aesthetics {
         let aes_col_name = naming::aesthetic_column(aesthetic);
         let select_expr = match value {
-            AestheticValue::Column { name, .. } => {
+            AestheticValue::Column { name, .. } | AestheticValue::AnnotationColumn { name } => {
                 // Check if this column needs casting
                 if let Some(req) = cast_map.get(name.as_str()) {
                     // Cast and rename to prefixed aesthetic name
@@ -144,7 +144,7 @@ pub fn apply_remappings_post_query(df: DataFrame, layer: &Layer) -> Result<DataF
         let target_col_name = naming::aesthetic_column(target_aesthetic);
 
         match value {
-            AestheticValue::Column { name, .. } => {
+            AestheticValue::Column { name, .. } | AestheticValue::AnnotationColumn { name } => {
                 // Check if this stat column exists in the DataFrame
                 if df.column(name).is_ok() {
                     df.rename(name, target_col_name.into()).map_err(|e| {
@@ -528,7 +528,6 @@ where
                         name: prefixed_name,
                         original_name,
                         is_dummy,
-                        is_scaled: true,
                     };
                     layer.mappings.insert(aesthetic.clone(), value);
                 }

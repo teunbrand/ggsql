@@ -301,7 +301,7 @@ pub fn build_aesthetic_schema(layer: &Layer, schema: &Schema) -> Schema {
     for (aesthetic, value) in &layer.mappings.aesthetics {
         let aes_col_name = naming::aesthetic_column(aesthetic);
         match value {
-            AestheticValue::Column { name, .. } => {
+            AestheticValue::Column { name, .. } | AestheticValue::AnnotationColumn { name } => {
                 // The schema already has aesthetic-prefixed column names from build_layer_base_query,
                 // so we look up by aesthetic name, not the original column name.
                 // Fall back to original name for backwards compatibility with older schemas.

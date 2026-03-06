@@ -173,7 +173,7 @@ impl DataSource {
 /// Value for aesthetic mappings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AestheticValue {
-    /// Column reference
+    /// Column reference from data source
     Column {
         name: String,
         /// Original column name before internal renaming (for labels)
@@ -182,33 +182,25 @@ pub enum AestheticValue {
         original_name: Option<String>,
         /// Whether this is a dummy/placeholder column (e.g., for bar charts without x mapped)
         is_dummy: bool,
-        /// Whether scales should be applied to this column
-        /// Set to false for annotation layer literals (e.g., stroke => ['red', 'blue'])
-        /// that are converted to columns but should use identity scales
-        is_scaled: bool,
+    },
+    /// Annotation column for non-positional aesthetics (synthesized from PLACE literals)
+    /// These columns are generated from user-specified literal values in visual space
+    /// (e.g., color => 'red', size => 10) and use identity scales (no transformation).
+    /// Positional annotations (x, y) use Column instead since they're in data coordinate space.
+    AnnotationColumn {
+        name: String,
     },
     /// Literal value (quoted string, number, or boolean)
     Literal(ParameterValue),
 }
 
 impl AestheticValue {
-    /// Create a column mapping
+    /// Create a standard column mapping
     pub fn standard_column(name: impl Into<String>) -> Self {
         Self::Column {
             name: name.into(),
             original_name: None,
             is_dummy: false,
-            is_scaled: true,
-        }
-    }
-
-    /// Create a column mapping with identity scale (no scale transformation)
-    pub fn identity_column(name: impl Into<String>) -> Self {
-        Self::Column {
-            name: name.into(),
-            original_name: None,
-            is_dummy: false,
-            is_scaled: false,
         }
     }
 
@@ -218,7 +210,6 @@ impl AestheticValue {
             name: name.into(),
             original_name: None,
             is_dummy: true,
-            is_scaled: true,
         }
     }
 
@@ -231,14 +222,20 @@ impl AestheticValue {
             name: name.into(),
             original_name: Some(original_name.into()),
             is_dummy: false,
-            is_scaled: true,
+        }
+    }
+
+    /// Create an annotation column mapping (synthesized from PLACE literals)
+    pub fn annotation_column(name: impl Into<String>) -> Self {
+        Self::AnnotationColumn {
+            name: name.into(),
         }
     }
 
     /// Get column name if this is a column mapping
     pub fn column_name(&self) -> Option<&str> {
         match self {
-            Self::Column { name, .. } => Some(name),
+            Self::Column { name, .. } | Self::AnnotationColumn { name } => Some(name),
             _ => None,
         }
     }
@@ -255,16 +252,19 @@ impl AestheticValue {
                 original_name,
                 ..
             } => Some(original_name.as_deref().unwrap_or(name)),
+            Self::AnnotationColumn { name } => Some(name),
             _ => None,
         }
     }
 
     /// Check if this is a dummy/placeholder column
     pub fn is_dummy(&self) -> bool {
-        match self {
-            Self::Column { is_dummy, .. } => *is_dummy,
-            _ => false,
-        }
+        matches!(self, Self::Column { is_dummy: true, .. })
+    }
+
+    /// Check if this is an annotation column
+    pub fn is_annotation(&self) -> bool {
+        matches!(self, Self::AnnotationColumn { .. })
     }
 
     /// Check if this is a literal value (not a column mapping)
@@ -276,7 +276,9 @@ impl AestheticValue {
 impl std::fmt::Display for AestheticValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AestheticValue::Column { name, .. } => write!(f, "{}", name),
+            AestheticValue::Column { name, .. } | AestheticValue::AnnotationColumn { name } => {
+                write!(f, "{}", name)
+            }
             AestheticValue::Literal(lit) => write!(f, "{}", lit),
         }
     }

@@ -258,12 +258,18 @@ impl Layer {
                     // Column is now named with the prefixed aesthetic name
                     *name = aes_col_name;
                 }
+                AestheticValue::AnnotationColumn { name } => {
+                    // AnnotationColumn already has identity scale behavior, just update name
+                    *name = aes_col_name;
+                }
                 AestheticValue::Literal(_) => {
                     // Literals become columns with prefixed aesthetic name
-                    // For annotation layers, non-positional aesthetics should use identity scales
+                    // For annotation layers:
+                    // - Positional aesthetics (x, y): use Column (data coordinate space, participate in scales)
+                    // - Non-positional aesthetics (color, size): use AnnotationColumn (visual space, identity scale)
                     let is_positional = is_positional_aesthetic(aesthetic);
                     *value = if is_annotation && !is_positional {
-                        AestheticValue::identity_column(aes_col_name)
+                        AestheticValue::annotation_column(aes_col_name)
                     } else {
                         AestheticValue::standard_column(aes_col_name)
                     };
@@ -293,7 +299,6 @@ impl Layer {
                 AestheticValue::Column {
                     original_name,
                     is_dummy,
-                    is_scaled,
                     ..
                 } => {
                     // Use the stat name from remappings as the original_name for labels
@@ -302,7 +307,13 @@ impl Layer {
                         name: prefixed_name,
                         original_name: original_name.clone(),
                         is_dummy: *is_dummy,
-                        is_scaled: *is_scaled,
+                    }
+                }
+                AestheticValue::AnnotationColumn { .. } => {
+                    // Annotation columns can be remapped (e.g., stat transforms on annotation data)
+                    // They remain annotation columns (identity scale)
+                    AestheticValue::AnnotationColumn {
+                        name: prefixed_name,
                     }
                 }
                 AestheticValue::Literal(_) => {
@@ -312,7 +323,6 @@ impl Layer {
                         name: prefixed_name,
                         original_name: None,
                         is_dummy: false,
-                        is_scaled: true,
                     }
                 }
             };
