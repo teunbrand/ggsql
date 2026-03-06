@@ -183,7 +183,7 @@ pub fn literal_to_series(name: &str, lit: &ParameterValue, len: usize) -> polars
         ParameterValue::String(s) => Series::new(name.into(), vec![s.as_str(); len]),
         ParameterValue::Boolean(b) => Series::new(name.into(), vec![*b; len]),
         ParameterValue::Array(_) | ParameterValue::Null => {
-            unreachable!("Grammar prevents arrays and null in literal aesthetic mappings")
+            unreachable!("Arrays are never moved to mappings; NULL is filtered in process_annotation_layers()")
         }
     }
 }
@@ -663,8 +663,8 @@ fn build_annotation_values_clause(layer: &Layer) -> Result<String> {
                     vec![ArrayElement::Boolean(*b); max_length]
                 }
                 crate::plot::ParameterValue::Null => {
-                    // Null: replicate to max_length
-                    vec![ArrayElement::Null; max_length]
+                    // NULL aesthetics are filtered in process_annotation_layers()
+                    unreachable!("NULL is filtered before reaching annotation VALUES clause")
                 }
             };
 

@@ -245,9 +245,12 @@ impl Plot {
 
                     // Move from parameters to mappings (no recycling - happens later in SQL generation)
                     if let Some(value) = layer.parameters.remove(&param_name) {
-                        layer
-                            .mappings
-                            .insert(&param_name, AestheticValue::Literal(value));
+                        // Filter out NULL aesthetics - they mean "use geom default"
+                        if !value.is_null() {
+                            layer
+                                .mappings
+                                .insert(&param_name, AestheticValue::Literal(value));
+                        }
                     }
                 }
             }
