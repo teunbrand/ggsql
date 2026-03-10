@@ -237,3 +237,165 @@ fn stat_tls(query: &str, aesthetics: &Mappings, group_by: &[String]) -> Result<S
         consumed_aesthetics: vec!["pos1".to_string(), "pos2".to_string()],
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plot::AestheticValue;
+    use crate::reader::duckdb::DuckDBReader;
+    use crate::reader::Reader;
+
+    #[test]
+    fn test_stat_ols_ungrouped() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = "SELECT x, y FROM (VALUES (1.0, 2.0), (2.0, 4.0), (3.0, 6.0)) AS t(x, y)";
+        let groups: Vec<String> = vec![];
+
+        let mut mapping = crate::Mappings::new();
+        mapping.aesthetics.insert("pos1".to_string(), AestheticValue::Column {
+            name: "x".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+        mapping.aesthetics.insert("pos2".to_string(), AestheticValue::Column {
+            name: "y".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+
+        let result = stat_ols(query, &mapping, &groups).expect("stat_ols should succeed");
+
+        if let StatResult::Transformed { query: sql, stat_columns, .. } = result {
+            assert_eq!(stat_columns, vec!["pos1", "intensity"]);
+
+            let df = reader.execute_sql(&sql).expect("SQL should execute");
+
+            // Should have 2 rows (min and max x)
+            assert_eq!(df.height(), 2);
+            assert_eq!(
+                df.get_column_names(),
+                vec!["__ggsql_stat_pos1", "__ggsql_stat_intensity"]
+            );
+        } else {
+            panic!("Expected Transformed result");
+        }
+    }
+
+    #[test]
+    fn test_stat_ols_grouped() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = "SELECT x, y, category FROM (VALUES
+            (1.0, 2.0, 'A'), (2.0, 4.0, 'A'), (3.0, 6.0, 'A'),
+            (1.0, 3.0, 'B'), (2.0, 5.0, 'B'), (3.0, 7.0, 'B')
+        ) AS t(x, y, category)";
+        let groups = vec!["category".to_string()];
+
+        let mut mapping = crate::Mappings::new();
+        mapping.aesthetics.insert("pos1".to_string(), AestheticValue::Column {
+            name: "x".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+        mapping.aesthetics.insert("pos2".to_string(), AestheticValue::Column {
+            name: "y".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+
+        let result = stat_ols(query, &mapping, &groups).expect("stat_ols should succeed");
+
+        if let StatResult::Transformed { query: sql, stat_columns, .. } = result {
+            assert_eq!(stat_columns, vec!["pos1", "intensity"]);
+
+            let df = reader.execute_sql(&sql).expect("SQL should execute");
+
+            // Should have 4 rows (2 points × 2 groups)
+            assert_eq!(df.height(), 4);
+            assert_eq!(
+                df.get_column_names(),
+                vec!["category", "__ggsql_stat_pos1", "__ggsql_stat_intensity"]
+            );
+        } else {
+            panic!("Expected Transformed result");
+        }
+    }
+
+    #[test]
+    fn test_stat_tls_ungrouped() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = "SELECT x, y FROM (VALUES (1.0, 2.0), (2.0, 4.0), (3.0, 6.0)) AS t(x, y)";
+        let groups: Vec<String> = vec![];
+
+        let mut mapping = crate::Mappings::new();
+        mapping.aesthetics.insert("pos1".to_string(), AestheticValue::Column {
+            name: "x".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+        mapping.aesthetics.insert("pos2".to_string(), AestheticValue::Column {
+            name: "y".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+
+        let result = stat_tls(query, &mapping, &groups).expect("stat_tls should succeed");
+
+        if let StatResult::Transformed { query: sql, stat_columns, .. } = result {
+            assert_eq!(stat_columns, vec!["pos1", "intensity"]);
+
+            let df = reader.execute_sql(&sql).expect("SQL should execute");
+
+            // Should have 2 rows (min and max x)
+            assert_eq!(df.height(), 2);
+            assert_eq!(
+                df.get_column_names(),
+                vec!["__ggsql_stat_pos1", "__ggsql_stat_intensity"]
+            );
+        } else {
+            panic!("Expected Transformed result");
+        }
+    }
+
+    #[test]
+    fn test_stat_tls_grouped() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = "SELECT x, y, category FROM (VALUES
+            (1.0, 2.0, 'A'), (2.0, 4.0, 'A'), (3.0, 6.0, 'A'),
+            (1.0, 3.0, 'B'), (2.0, 5.0, 'B'), (3.0, 7.0, 'B')
+        ) AS t(x, y, category)";
+        let groups = vec!["category".to_string()];
+
+        let mut mapping = crate::Mappings::new();
+        mapping.aesthetics.insert("pos1".to_string(), AestheticValue::Column {
+            name: "x".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+        mapping.aesthetics.insert("pos2".to_string(), AestheticValue::Column {
+            name: "y".to_string(),
+            original_name: None,
+            is_dummy: false,
+        });
+
+        let result = stat_tls(query, &mapping, &groups).expect("stat_tls should succeed");
+
+        if let StatResult::Transformed { query: sql, stat_columns, .. } = result {
+            assert_eq!(stat_columns, vec!["pos1", "intensity"]);
+
+            let df = reader.execute_sql(&sql).expect("SQL should execute");
+
+            // Should have 4 rows (2 points × 2 groups)
+            assert_eq!(df.height(), 4);
+            assert_eq!(
+                df.get_column_names(),
+                vec!["category", "__ggsql_stat_pos1", "__ggsql_stat_intensity"]
+            );
+        } else {
+            panic!("Expected Transformed result");
+        }
+    }
+}
