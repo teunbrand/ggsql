@@ -92,6 +92,7 @@ impl GeomTrait for Density {
             query,
             aesthetics,
             "pos1",
+            None,
             group_by,
             parameters,
             execute_query,
@@ -127,6 +128,7 @@ pub(crate) fn stat_density(
     query: &str,
     aesthetics: &Mappings,
     value_aesthetic: &str,
+    smooth_aesthetic: Option<&str>,
     group_by: &[String],
     parameters: &HashMap<String, ParameterValue>,
     execute: &dyn Fn(&str) -> crate::Result<polars::prelude::DataFrame>,
@@ -137,13 +139,25 @@ pub(crate) fn stat_density(
             value_aesthetic
         ))
     })?;
+    let mut smooth = None;
+    if let Some(smth) = smooth_aesthetic {
+        smooth = get_column_name(aesthetics, smth);
+    }
+
     let weight = get_column_name(aesthetics, "weight");
 
     let (min, max) = compute_range_sql(&value, query, execute)?;
     let bw_cte = density_sql_bandwidth(query, group_by, &value, parameters);
-    let data_cte = build_data_cte(&value, weight.as_deref(), query, group_by);
+    let data_cte = build_data_cte(
+        &value,
+        smooth.as_deref(),
+        weight.as_deref(),
+        query,
+        group_by,
+    );
     let grid_cte = build_grid_cte(group_by, query, min, max, 512);
-    let kernel = choose_kde_kernel(parameters)?;
+    let kernel = choose_kde_kernel(parameters, smooth)?;
+
     let density_query = compute_density(
         value_aesthetic,
         group_by,
@@ -287,7 +301,10 @@ fn silverman_rule(adjust: f64, value_column: &str) -> String {
     )
 }
 
-fn choose_kde_kernel(parameters: &HashMap<String, ParameterValue>) -> Result<String> {
+fn choose_kde_kernel(
+    parameters: &HashMap<String, ParameterValue>,
+    smooth: Option<String>,
+) -> Result<String> {
     let kernel = match parameters.get("kernel") {
         Some(ParameterValue::String(krnl)) => krnl.as_str(),
         _ => {
@@ -336,20 +353,39 @@ fn choose_kde_kernel(parameters: &HashMap<String, ParameterValue>) -> Result<Str
         )));
         }
     };
-    // Use weighted sum for density computation
-    // Weighted: density = (1/h) × Σ(wi × K((x-xi)/h)) / Σwi
-    Ok(format!(
-        "SUM(data.weight * ({kernel})) / ANY_VALUE(bandwidth.bw)",
-        kernel = kernel
-    ))
+    if let Some(smth) = smooth {
+        Ok(format!(
+            "SUM(data.weight * ({kernel}) * ({smth})) / SUM(data.weight * ({kernel}))",
+            kernel = kernel,
+            smth = smth
+        ))
+    } else {
+        // Use weighted sum for density computation
+        // Weighted: density = (1/h) × Σ(wi × K((x-xi)/h)) / Σwi
+        Ok(format!(
+            "SUM(data.weight * ({kernel})) / ANY_VALUE(bandwidth.bw)",
+            kernel = kernel
+        ))
+    }
 }
 
-fn build_data_cte(value: &str, weight: Option<&str>, from: &str, group_by: &[String]) -> String {
+fn build_data_cte(
+    value: &str,
+    smooth: Option<&str>,
+    weight: Option<&str>,
+    from: &str,
+    group_by: &[String],
+) -> String {
     // Include weight column if provided, otherwise default to 1.0
     let weight_col = if let Some(w) = weight {
         format!(", {} AS weight", w)
     } else {
         ", 1.0 AS weight".to_string()
+    };
+    let smooth_col = if let Some(s) = smooth {
+        format!(", {}", s)
+    } else {
+        "".to_string()
     };
 
     // Only filter out nulls in value column, keep NULLs in group columns
@@ -357,13 +393,14 @@ fn build_data_cte(value: &str, weight: Option<&str>, from: &str, group_by: &[Str
 
     format!(
         "data AS (
-          SELECT {groups}{value} AS val{weight_col}
+          SELECT {groups}{value} AS val{weight_col}{smooth_col}
           FROM ({from})
           WHERE {filter_valid}
         )",
         groups = with_trailing_comma(&group_by.join(", ")),
         value = value,
         weight_col = weight_col,
+        smooth_col = smooth_col,
         from = from,
         filter_valid = filter_valid
     )
@@ -510,9 +547,9 @@ mod tests {
         );
 
         let bw_cte = density_sql_bandwidth(query, &groups, "x", &parameters);
-        let data_cte = build_data_cte("x", None, query, &groups);
+        let data_cte = build_data_cte("x", None, None, query, &groups);
         let grid_cte = build_grid_cte(&groups, query, 0.0, 10.0, 512);
-        let kernel = choose_kde_kernel(&parameters).expect("kernel should be valid");
+        let kernel = choose_kde_kernel(&parameters, None).expect("kernel should be valid");
         let sql = compute_density("x", &groups, kernel, &bw_cte, &data_cte, &grid_cte);
 
         let expected = "WITH bandwidth AS (SELECT 0.5 AS bw),
@@ -572,9 +609,9 @@ mod tests {
         );
 
         let bw_cte = density_sql_bandwidth(query, &groups, "x", &parameters);
-        let data_cte = build_data_cte("x", None, query, &groups);
+        let data_cte = build_data_cte("x", None, None, query, &groups);
         let grid_cte = build_grid_cte(&groups, query, -10.0, 10.0, 512);
-        let kernel = choose_kde_kernel(&parameters).expect("kernel should be valid");
+        let kernel = choose_kde_kernel(&parameters, None).expect("kernel should be valid");
         let sql = compute_density("x", &groups, kernel, &bw_cte, &data_cte, &grid_cte);
 
         let expected = "WITH bandwidth AS (SELECT 0.5 AS bw, region, category FROM (SELECT x, region, category FROM (VALUES (1.0, 'A', 'X'), (2.0, 'B', 'Y')) AS t(x, region, category)) GROUP BY region, category),
@@ -725,10 +762,10 @@ mod tests {
         );
 
         let bw_cte = density_sql_bandwidth(query, &groups, "x", &parameters);
-        let data_cte = build_data_cte("x", None, query, &groups);
+        let data_cte = build_data_cte("x", None, None, query, &groups);
         // Use wide range to capture essentially all density mass
         let grid_cte = build_grid_cte(&groups, query, -5.0, 15.0, 512);
-        let kernel = choose_kde_kernel(&parameters).expect("kernel should be valid");
+        let kernel = choose_kde_kernel(&parameters, None).expect("kernel should be valid");
         let sql = compute_density("x", &groups, kernel, &bw_cte, &data_cte, &grid_cte);
 
         // Execute query
@@ -808,7 +845,7 @@ mod tests {
             ParameterValue::String("invalid_kernel".to_string()),
         );
 
-        let result = choose_kde_kernel(&parameters);
+        let result = choose_kde_kernel(&parameters, None);
 
         assert!(result.is_err());
         match result {
@@ -834,10 +871,10 @@ mod tests {
 
         let bw_cte = density_sql_bandwidth(query, &groups, "x", &parameters);
         let grid_cte = build_grid_cte(&groups, query, 0.0, 4.0, 100);
-        let kernel = choose_kde_kernel(&parameters).expect("kernel should be valid");
+        let kernel = choose_kde_kernel(&parameters, None).expect("kernel should be valid");
 
         // Unweighted (default weights of 1.0)
-        let data_cte_unweighted = build_data_cte("x", None, query, &groups);
+        let data_cte_unweighted = build_data_cte("x", None, None, query, &groups);
         let sql_unweighted = compute_density(
             "x",
             &groups,
@@ -854,7 +891,7 @@ mod tests {
 
         // With explicit uniform weights (should be equivalent)
         let query_weighted = "SELECT x, 1.0 AS weight FROM (VALUES (1.0), (2.0), (3.0)) AS t(x)";
-        let data_cte_weighted = build_data_cte("x", Some("weight"), query_weighted, &groups);
+        let data_cte_weighted = build_data_cte("x", None, Some("weight"), query_weighted, &groups);
         let sql_weighted =
             compute_density("x", &groups, kernel, &bw_cte, &data_cte_weighted, &grid_cte);
         let df_weighted = reader
@@ -995,9 +1032,9 @@ mod tests {
         );
 
         let bw_cte = density_sql_bandwidth(query, &groups, "x", &parameters);
-        let data_cte = build_data_cte("x", None, query, &groups);
+        let data_cte = build_data_cte("x", None, None, query, &groups);
         let grid_cte = build_grid_cte(&groups, query, 0.0, 100.0, 512);
-        let kernel = choose_kde_kernel(&parameters).expect("kernel should be valid");
+        let kernel = choose_kde_kernel(&parameters, None).expect("kernel should be valid");
         let sql = compute_density("x", &groups, kernel, &bw_cte, &data_cte, &grid_cte);
 
         // Warm-up run

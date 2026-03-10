@@ -41,6 +41,7 @@ pub fn geom_to_mark(geom: &Geom) -> Value {
         GeomType::Text => "text",
         GeomType::Label => "text",
         GeomType::Segment => "rule",
+        GeomType::Smooth => "line",
         GeomType::Rule => "rule",
         GeomType::Linear => "rule",
         GeomType::ErrorBar => "rule",

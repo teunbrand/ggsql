@@ -120,6 +120,7 @@ fn stat_violin(
         query,
         aesthetics,
         "pos2",
+        None,
         group_by.as_slice(),
         parameters,
         execute,
