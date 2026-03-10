@@ -86,9 +86,10 @@ impl GeomTrait for Smooth {
                 parameters,
                 execute_query,
             ),
-            "ols" => stat_lm(query, aesthetics, group_by),
+            "ols" => stat_ols(query, aesthetics, group_by),
+            "tls" => stat_tls(query, aesthetics, group_by),
             _ => Err(GgsqlError::ValidationError(
-                "The `method` setting must be 'nw' or 'lm'.".to_string(),
+                "The `method` setting must be 'nw', 'ols', or 'tls'.".to_string(),
             )),
         }
     }
@@ -102,7 +103,7 @@ impl std::fmt::Display for Smooth {
     }
 }
 
-fn stat_lm(query: &str, aesthetics: &Mappings, group_by: &[String]) -> Result<StatResult> {
+fn stat_ols(query: &str, aesthetics: &Mappings, group_by: &[String]) -> Result<StatResult> {
     let x_col = get_column_name(aesthetics, "pos1").ok_or_else(|| {
         GgsqlError::ValidationError("Smooth requires 'pos1' aesthetic".to_string())
     })?;
@@ -153,6 +154,79 @@ fn stat_lm(query: &str, aesthetics: &Mappings, group_by: &[String]) -> Result<St
         data = query,
         x_out = naming::stat_column("pos1"),
         y_out = naming::stat_column("intensity"), // We name this 'intensity' to be consistent with the nadaraya-watson kernel
+        group_by = group_by_clause
+    );
+
+    Ok(StatResult::Transformed {
+        query: final_query,
+        stat_columns: vec!["pos1".to_string(), "intensity".to_string()],
+        dummy_columns: vec![],
+        consumed_aesthetics: vec!["pos1".to_string(), "pos2".to_string()],
+    })
+}
+
+fn stat_tls(query: &str, aesthetics: &Mappings, group_by: &[String]) -> Result<StatResult> {
+    let x_col = get_column_name(aesthetics, "pos1").ok_or_else(|| {
+        GgsqlError::ValidationError("Smooth requires 'pos1' aesthetic".to_string())
+    })?;
+    let y_col = get_column_name(aesthetics, "pos2").ok_or_else(|| {
+        GgsqlError::ValidationError("Smooth requires 'pos2' aesthetic".to_string())
+    })?;
+
+    // Build group-related SQL fragments
+    let (groups_str, group_by_clause) = if group_by.is_empty() {
+        (String::new(), String::new())
+    } else {
+        (
+            format!("{}, ", group_by.join(", ")),
+            format!("GROUP BY {}", group_by.join(", ")),
+        )
+    };
+
+    // Compute Total Least Squares (orthogonal regression)
+    // TLS minimizes perpendicular distances, not vertical distances
+    // Slope: β = (Var(y) - Var(x) + sqrt((Var(y) - Var(x))² + 4*Cov(x,y)²)) / (2*Cov(x,y))
+    // Where: Var(x) = E[x²] - E[x]², Var(y) = E[y²] - E[y]², Cov(x,y) = E[xy] - E[x]E[y]
+    let final_query = format!(
+        "WITH
+        coefficients AS (
+          SELECT
+            {groups}AVG({x}) AS x_mean,
+            AVG({y}) AS y_mean,
+            AVG({x} * {y}) AS xy_mean,
+            AVG({x} * {x}) AS xx_mean,
+            AVG({y} * {y}) AS yy_mean,
+            MIN({x}) AS x_min,
+            MAX({x}) AS x_max
+          FROM ({data})
+          WHERE {x} IS NOT NULL AND {y} IS NOT NULL
+          {group_by}
+        ),
+        tls_coefficients AS (
+          SELECT
+            {groups}x_mean,
+            y_mean,
+            (yy_mean - y_mean * y_mean) - (xx_mean - x_mean * x_mean) AS var_diff,
+            (xy_mean - x_mean * y_mean) AS covariance,
+            x_min,
+            x_max
+          FROM coefficients
+        )
+        SELECT
+          {groups}x_min AS {x_out},
+          (y_mean + ((var_diff + SQRT(var_diff * var_diff + 4 * covariance * covariance)) / (2 * covariance)) * (x_min - x_mean)) AS {y_out}
+        FROM tls_coefficients
+        UNION ALL
+        SELECT
+          {groups}x_max AS {x_out},
+          (y_mean + ((var_diff + SQRT(var_diff * var_diff + 4 * covariance * covariance)) / (2 * covariance)) * (x_max - x_mean)) AS {y_out}
+        FROM tls_coefficients",
+        groups = groups_str,
+        x = x_col,
+        y = y_col,
+        data = query,
+        x_out = naming::stat_column("pos1"),
+        y_out = naming::stat_column("intensity"),
         group_by = group_by_clause
     );
 
