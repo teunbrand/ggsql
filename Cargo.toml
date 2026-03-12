@@ -20,14 +20,18 @@ version = "0.1.0"
 edition = "2021"
 authors = ["ggsql Team"]
 license = "MIT"
-repository = "https://github.com/georgestagg/ggsql"
-homepage = "https://github.com/georgestagg/ggsql"
-description = "SQL extension for declarative data visualization"
+repository = "https://github.com/posit-dev/ggsql"
+homepage = "https://ggsql.org"
+description = "A declarative visualization language that extends SQL with powerful data visualization capabilities."
 
 [workspace.dependencies]
+# workspace packages
+tree-sitter-ggsql = { path = "tree-sitter-ggsql", version = "0.1.0" }
+ggsql = { path = "src", version = "0.1.0" }
+
 # Parsing
-tree-sitter = "0.26"
 csscolorparser = "0.8.1"
+tree-sitter = "0.26"
 
 # Data processing
 polars = { version = "0.52", default-features = false }

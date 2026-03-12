@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description.workspace = true
+description = "WebAssembly bindings for ggsql."
 
 [lib]
 crate-type = ["cdylib"]
