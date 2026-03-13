@@ -1,5 +1,7 @@
 project:
   type: website
+  resources:
+    - wasm/**
 
 website:
   title: "ggsql"
@@ -51,6 +53,9 @@ website:
         href: gallery/index.qmd
       - href: faq.qmd
         text: FAQ
+    right:
+      - text: Playground
+        href: wasm/index.html
     tools:
       - icon: github
         menu:
@@ -122,4 +127,15 @@ format:
           <script>
               window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
               plausible.init()
+          </script>
+    include-after-body:
+      - text: |
+          <script type="module">
+            const offset = document.querySelector('meta[name="quarto:offset"]')?.content || './';
+            const base = offset + 'wasm/';
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = base + 'quarto.css';
+            document.head.appendChild(link);
+            import(base + 'quarto.js');
           </script>
