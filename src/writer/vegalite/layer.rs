@@ -654,7 +654,7 @@ impl TextRenderer {
     }
 
     /// Split label values containing newlines into arrays of strings
-    fn split_label_newlines(values: &mut Vec<Value>) -> Result<()> {
+    fn split_label_newlines(values: &mut [Value]) -> Result<()> {
         let label_col = naming::aesthetic_column("label");
 
         for row in values.iter_mut() {
