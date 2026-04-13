@@ -2685,7 +2685,11 @@ mod tests {
         let result = prepare_data_with_reader(query, &reader).unwrap();
 
         assert_eq!(result.specs.len(), 1);
-        assert_eq!(result.specs[0].layers.len(), 1, "Should have one PLACE layer");
+        assert_eq!(
+            result.specs[0].layers.len(),
+            1,
+            "Should have one PLACE layer"
+        );
 
         let text_layer = &result.specs[0].layers[0];
         assert_eq!(text_layer.geom, crate::Geom::text());
