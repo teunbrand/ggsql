@@ -22,7 +22,7 @@ website:
   announcement:
     icon: info-circle
     dismissable: true
-    content: "ggsql is still in early development and all functionality is subject to change"
+    content: "ggsql is still in early development and all functionality is subject to change. Read the [alpha-release announcement](https://opensource.posit.co/blog/2026-04-20_ggsql_alpha_release/)"
     type: primary
     position: below-navbar
   twitter-card:
