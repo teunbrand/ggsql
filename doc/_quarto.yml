@@ -65,7 +65,7 @@ website:
     right:
       - text: Playground
         href: wasm/index.html
-      - text: '{{< iconify fa7-brands:r-project title="R bindings" label="link to R bindings" >}}'
+      - text: '{{< iconify fa7-brands:r-project title="R bindings" label="link to R bindings" size=xl >}}'
         href: https://r.ggsql.org
     tools:
       - icon: github
