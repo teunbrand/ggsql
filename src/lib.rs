@@ -997,4 +997,156 @@ mod integration_tests {
             result3.err()
         );
     }
+
+    #[cfg(feature = "spatial")]
+    #[test]
+    fn test_end_to_end_spatial_geojson_features() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        reader
+            .connection()
+            .execute(
+                "CREATE TABLE regions AS SELECT * FROM (VALUES
+                    ('{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}', 'North', 200),
+                    ('{\"type\":\"Polygon\",\"coordinates\":[[[1,0],[2,0],[2,1],[1,1],[1,0]]]}', 'South', 150)
+                ) AS t(geom, region, population)",
+                duckdb::params![],
+            )
+            .unwrap();
+
+        let query = r#"
+            SELECT * FROM regions
+            VISUALISE
+            DRAW spatial MAPPING geom AS geometry, population AS fill
+            LABEL title => 'Population by Region'
+        "#;
+
+        let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
+
+        let writer = VegaLiteWriter::new();
+        let json_str = writer.write(&prepared.specs[0], &prepared.data).unwrap();
+        let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // Mark should be geoshape
+        assert_eq!(vl_spec["layer"][0]["mark"]["type"], "geoshape");
+
+        // Data should contain GeoJSON Features
+        let data = vl_spec["data"]["values"].as_array().unwrap();
+        let layer_key = prepared.specs[0].layers[0].data_key.as_ref().unwrap();
+        let spatial_rows: Vec<_> = data
+            .iter()
+            .filter(|r| r[naming::SOURCE_COLUMN] == layer_key.as_str())
+            .collect();
+        assert_eq!(spatial_rows.len(), 2);
+
+        let feature = &spatial_rows[0];
+        assert_eq!(feature["type"], "Feature");
+        assert_eq!(feature["geometry"]["type"], "Polygon");
+        assert!(feature["properties"].is_object());
+
+        // Fill aesthetic should be in properties
+        let fill_col = naming::aesthetic_column("fill");
+        assert_eq!(feature["properties"][&fill_col], 200);
+
+        // Encoding: fill present, geometry absent
+        let encoding = &vl_spec["layer"][0]["encoding"];
+        assert!(encoding.get("geometry").is_none());
+        assert_eq!(encoding["fill"]["field"].as_str().unwrap(), fill_col);
+
+        assert_eq!(vl_spec["title"], "Population by Region");
+    }
+
+    #[cfg(feature = "spatial")]
+    #[test]
+    fn test_end_to_end_spatial_wkb_hex_input() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        // WKB hex for POINT(1 2) - little-endian
+        let query = r#"
+            SELECT
+                '0101000000000000000000F03F0000000000000040' as geom,
+                'test' as name
+            VISUALISE
+            DRAW spatial MAPPING geom AS geometry
+        "#;
+
+        let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
+
+        let writer = VegaLiteWriter::new();
+        let json_str = writer.write(&prepared.specs[0], &prepared.data).unwrap();
+        let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let data = vl_spec["data"]["values"].as_array().unwrap();
+        let layer_key = prepared.specs[0].layers[0].data_key.as_ref().unwrap();
+        let spatial_rows: Vec<_> = data
+            .iter()
+            .filter(|r| r[naming::SOURCE_COLUMN] == layer_key.as_str())
+            .collect();
+        assert_eq!(spatial_rows.len(), 1);
+        assert_eq!(spatial_rows[0]["type"], "Feature");
+        assert_eq!(spatial_rows[0]["geometry"]["type"], "Point");
+        // Point(1, 2) should have coordinates [1.0, 2.0]
+        let coords = spatial_rows[0]["geometry"]["coordinates"].as_array().unwrap();
+        assert_eq!(coords[0].as_f64().unwrap(), 1.0);
+        assert_eq!(coords[1].as_f64().unwrap(), 2.0);
+    }
+
+    #[cfg(feature = "spatial")]
+    #[test]
+    fn test_end_to_end_spatial_mixed_with_nonspatial_layer() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        reader
+            .connection()
+            .execute(
+                "CREATE TABLE geo_data AS SELECT * FROM (VALUES
+                    ('{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}', 'A', 10),
+                    ('{\"type\":\"Polygon\",\"coordinates\":[[[1,0],[2,0],[2,1],[1,1],[1,0]]]}', 'B', 20)
+                ) AS t(geom, name, val)",
+                duckdb::params![],
+            )
+            .unwrap();
+
+        reader
+            .connection()
+            .execute(
+                "CREATE TABLE labels AS SELECT * FROM (VALUES
+                    (0.5, 0.5, 'Label A'),
+                    (1.5, 0.5, 'Label B')
+                ) AS t(x, y, text)",
+                duckdb::params![],
+            )
+            .unwrap();
+
+        let query = r#"
+            SELECT * FROM geo_data
+            VISUALISE
+            DRAW spatial MAPPING geom AS geometry, val AS fill
+            DRAW text MAPPING x AS x, y AS y, text AS label FROM labels
+        "#;
+
+        let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
+
+        let writer = VegaLiteWriter::new();
+        let json_str = writer.write(&prepared.specs[0], &prepared.data).unwrap();
+        let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // Should have 2 layers
+        let layers = vl_spec["layer"].as_array().unwrap();
+        assert_eq!(layers.len(), 2);
+
+        // Layer 0: geoshape
+        assert_eq!(layers[0]["mark"]["type"], "geoshape");
+
+        // Layer 1: text (rendered as nested layer)
+        assert!(
+            layers[1]["layer"].is_array(),
+            "Text layer should be a nested layer group"
+        );
+        assert_eq!(layers[1]["layer"][0]["mark"]["type"], "text");
+
+        // Unified data should have rows from both layers
+        let data = vl_spec["data"]["values"].as_array().unwrap();
+        assert!(data.len() >= 4, "Should have rows from both layers");
+    }
 }

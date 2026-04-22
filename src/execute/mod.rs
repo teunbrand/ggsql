@@ -230,110 +230,6 @@ fn merge_global_mappings_into_layers(specs: &mut [Plot], layer_schemas: &[Schema
     }
 }
 
-/// Detect geometry columns by running DESCRIBE on the source query.
-///
-/// Returns a set of column names that have GEOMETRY type.
-/// Fails gracefully (returns empty set) if DESCRIBE is not supported.
-fn detect_geometry_columns<F>(source_query: &str, execute_query: &F) -> HashSet<String>
-where
-    F: Fn(&str) -> Result<DataFrame>,
-{
-    let describe_query = format!("DESCRIBE ({})", source_query);
-    let Ok(df) = execute_query(&describe_query) else {
-        return HashSet::new();
-    };
-
-    let Ok(names_col) = df.column("column_name") else {
-        return HashSet::new();
-    };
-    let Ok(types_col) = df.column("column_type") else {
-        return HashSet::new();
-    };
-
-    let names = names_col.as_materialized_series();
-    let types = types_col.as_materialized_series();
-
-    let Ok(names_str) = names.str() else {
-        return HashSet::new();
-    };
-    let Ok(types_str) = types.str() else {
-        return HashSet::new();
-    };
-
-    names_str
-        .iter()
-        .zip(types_str.iter())
-        .filter_map(|(name, type_str)| {
-            match (name, type_str) {
-                (Some(name), Some(t)) if t.to_uppercase().contains("GEOMETRY") => {
-                    Some(name.to_string())
-                }
-                _ => None,
-            }
-        })
-        .collect()
-}
-
-/// Auto-map geometry aesthetic for spatial geom layers.
-///
-/// For layers using `GeomType::Spatial` that don't have an explicit `geometry`
-/// aesthetic mapping, detect geometry columns from the schema and auto-map
-/// if exactly one is found.
-fn auto_map_geometry_aesthetic<F>(
-    specs: &mut [Plot],
-    layer_source_queries: &[String],
-    execute_query: &F,
-) -> Result<()>
-where
-    F: Fn(&str) -> Result<DataFrame>,
-{
-    use crate::plot::layer::geom::GeomType;
-
-    for spec in specs {
-        for (layer, source_query) in spec.layers.iter_mut().zip(layer_source_queries.iter()) {
-            if layer.geom.geom_type() != GeomType::Spatial {
-                continue;
-            }
-
-            if layer.mappings.aesthetics.contains_key("geometry") {
-                continue;
-            }
-
-            let geometry_cols = detect_geometry_columns(source_query, execute_query);
-
-            match geometry_cols.len() {
-                0 => {
-                    return Err(GgsqlError::ValidationError(
-                        "DRAW spatial requires a geometry column, but none found in data. \
-                         Ensure your query includes a GEOMETRY column (e.g. via ST_Read() \
-                         or the DuckDB spatial extension)."
-                            .to_string(),
-                    ));
-                }
-                1 => {
-                    let col_name = geometry_cols.into_iter().next().unwrap();
-                    layer.mappings.aesthetics.insert(
-                        "geometry".to_string(),
-                        AestheticValue::standard_column(&col_name),
-                    );
-                }
-                _ => {
-                    let mut cols: Vec<String> = geometry_cols.into_iter().collect();
-                    cols.sort();
-                    return Err(GgsqlError::ValidationError(format!(
-                        "DRAW spatial found multiple geometry columns: {}. \
-                         Use explicit mapping: MAPPING {} AS geometry",
-                        cols.join(", "),
-                        cols[0]
-                    )));
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// Resolve aesthetic aliases in a plot specification.
 ///
 /// For each alias defined in [`AESTHETIC_ALIASES`], splits the alias in scales,
@@ -1122,9 +1018,6 @@ pub fn prepare_data_with_reader(query: &str, reader: &dyn Reader) -> Result<Prep
     // because transformation happens in builder.rs right after parsing
     merge_global_mappings_into_layers(&mut specs, &layer_schemas);
 
-    // Auto-map geometry aesthetic for spatial layers
-    auto_map_geometry_aesthetic(&mut specs, &layer_source_queries, &execute_query)?;
-
     // Resolve aesthetic aliases (e.g., 'color' → 'fill'/'stroke') early in the pipeline
     // This must happen before validation so concrete aesthetics are validated
     for spec in &mut specs {
@@ -1472,6 +1365,7 @@ pub fn prepare_data_with_reader(query: &str, reader: &dyn Reader) -> Result<Prep
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plot::layer::geom::GeomType;
 
     #[cfg(feature = "duckdb")]
     #[test]
@@ -2948,4 +2842,35 @@ mod tests {
             err_msg
         );
     }
+
+    #[cfg(all(feature = "duckdb", feature = "spatial"))]
+    #[test]
+    fn test_spatial_explicit_geojson_string() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = r#"
+            SELECT
+                '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}' as geom,
+                'A' as name,
+                100 as value
+            VISUALISE
+            DRAW spatial MAPPING geom AS geometry, value AS fill
+        "#;
+
+        let result = prepare_data_with_reader(query, &reader);
+        assert!(result.is_ok(), "Spatial with explicit GeoJSON failed: {:?}", result.err());
+
+        let prepared = result.unwrap();
+        assert_eq!(prepared.specs[0].layers[0].geom.geom_type(), GeomType::Spatial);
+        assert!(
+            prepared.specs[0].layers[0]
+                .mappings
+                .aesthetics
+                .contains_key("geometry"),
+            "geometry aesthetic should be present"
+        );
+        let layer_key = prepared.specs[0].layers[0].data_key.as_ref().unwrap();
+        assert!(prepared.data.contains_key(layer_key));
+    }
+
 }

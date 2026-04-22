@@ -2182,16 +2182,6 @@ impl GeomRenderer for SpatialRenderer {
             })
         }
     }
-
-    fn modify_encoding(
-        &self,
-        encoding: &mut Map<String, Value>,
-        _layer: &Layer,
-        _context: &RenderContext,
-    ) -> Result<()> {
-        encoding.remove(&naming::aesthetic_column("geometry"));
-        Ok(())
-    }
 }
 
 // =============================================================================
