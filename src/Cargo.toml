@@ -45,6 +45,10 @@ toml_edit = { workspace = true, optional = true }
 # Writers
 plotters = { workspace = true, optional = true }
 
+# Spatial
+geozero = { workspace = true, optional = true, features = ["with-wkb", "with-geojson"] }
+hex = { workspace = true, optional = true }
+
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
@@ -69,13 +73,14 @@ tempfile = "3.8"
 ureq = "3"
 
 [features]
-default = ["duckdb", "sqlite", "vegalite", "ipc", "parquet", "builtin-data", "odbc"]
+default = ["duckdb", "sqlite", "vegalite", "ipc", "parquet", "builtin-data", "odbc", "spatial"]
 ipc = ["polars/ipc"]
 duckdb = ["dep:duckdb", "dep:arrow"]
 parquet = ["polars/parquet"]
 postgres = ["dep:postgres"]
 sqlite = ["dep:rusqlite"]
 odbc = ["dep:odbc-api", "dep:toml_edit"]
+spatial = ["dep:geozero", "dep:hex"]
 vegalite = []
 ggplot2 = []
 builtin-data = []

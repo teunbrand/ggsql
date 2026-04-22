@@ -45,6 +45,7 @@ pub fn geom_to_mark(geom: &Geom) -> Value {
         GeomType::Smooth => "line",
         GeomType::Rule => "rule",
         GeomType::ErrorBar => "rule",
+        GeomType::Spatial => "geoshape",
         _ => "point", // Default fallback
     };
     json!({
@@ -2070,6 +2071,130 @@ impl GeomRenderer for BoxplotRenderer {
 }
 
 // =============================================================================
+// Spatial Renderer
+// =============================================================================
+
+struct SpatialRenderer;
+
+#[cfg(feature = "spatial")]
+impl SpatialRenderer {
+    fn parse_geometry(value: &Value) -> Result<Value> {
+        match value {
+            Value::String(s) => {
+                let trimmed = s.trim();
+                if trimmed.starts_with('{') {
+                    serde_json::from_str(trimmed).map_err(|e| {
+                        GgsqlError::WriterError(format!("Invalid GeoJSON geometry: {}", e))
+                    })
+                } else {
+                    use geozero::geojson::GeoJsonWriter;
+                    use geozero::wkb::Wkb;
+                    use geozero::GeozeroGeometry;
+                    use std::io::Cursor;
+
+                    let hex_str = trimmed.strip_prefix("\\x").unwrap_or(trimmed);
+                    let wkb_bytes = hex::decode(hex_str).map_err(|e| {
+                        GgsqlError::WriterError(format!("Invalid WKB hex: {}", e))
+                    })?;
+
+                    let mut geojson_out = Vec::new();
+                    let wkb = Wkb(wkb_bytes.as_slice());
+                    wkb.process_geom(&mut GeoJsonWriter::new(Cursor::new(&mut geojson_out)))
+                        .map_err(|e| {
+                            GgsqlError::WriterError(format!(
+                                "Failed to convert WKB to GeoJSON: {}",
+                                e
+                            ))
+                        })?;
+
+                    serde_json::from_slice(&geojson_out).map_err(|e| {
+                        GgsqlError::WriterError(format!("Invalid GeoJSON from WKB: {}", e))
+                    })
+                }
+            }
+            _ => Err(GgsqlError::WriterError(
+                "Geometry column must contain a string (GeoJSON or WKB hex)".to_string(),
+            )),
+        }
+    }
+}
+
+impl GeomRenderer for SpatialRenderer {
+    fn prepare_data(
+        &self,
+        df: &DataFrame,
+        _layer: &Layer,
+        _data_key: &str,
+        _binned_columns: &HashMap<String, Vec<f64>>,
+    ) -> Result<PreparedData> {
+        #[cfg(not(feature = "spatial"))]
+        {
+            return Err(GgsqlError::WriterError(
+                "Spatial visualization requires the 'spatial' feature to be enabled".to_string(),
+            ));
+        }
+
+        #[cfg(feature = "spatial")]
+        {
+            let geometry_col = naming::aesthetic_column("geometry");
+
+            let col_names: Vec<String> =
+                df.get_column_names().iter().map(|s| s.to_string()).collect();
+
+            let mut features = Vec::with_capacity(df.height());
+
+            for row_idx in 0..df.height() {
+                let mut feature = serde_json::Map::new();
+                feature.insert("type".to_string(), json!("Feature"));
+
+                let mut properties = serde_json::Map::new();
+
+                for col_name in &col_names {
+                    let series = df
+                        .column(col_name)
+                        .map_err(|e| {
+                            GgsqlError::WriterError(format!(
+                                "Failed to get column '{}': {}",
+                                col_name, e
+                            ))
+                        })?
+                        .as_materialized_series();
+
+                    let value =
+                        super::data::series_value_at(series, row_idx)?;
+
+                    if *col_name == geometry_col {
+                        let geom = Self::parse_geometry(&value)?;
+                        feature.insert("geometry".to_string(), geom);
+                    } else {
+                        properties.insert(col_name.clone(), value.clone());
+                        feature.insert(col_name.clone(), value);
+                    }
+                }
+
+                feature.insert("properties".to_string(), Value::Object(properties));
+                features.push(Value::Object(feature));
+            }
+
+            Ok(PreparedData::Single {
+                values: features,
+                metadata: Box::new(()),
+            })
+        }
+    }
+
+    fn modify_encoding(
+        &self,
+        encoding: &mut Map<String, Value>,
+        _layer: &Layer,
+        _context: &RenderContext,
+    ) -> Result<()> {
+        encoding.remove(&naming::aesthetic_column("geometry"));
+        Ok(())
+    }
+}
+
+// =============================================================================
 // Dispatcher
 // =============================================================================
 
@@ -2087,6 +2212,7 @@ pub fn get_renderer(geom: &Geom) -> Box<dyn GeomRenderer> {
         GeomType::Segment => Box::new(SegmentRenderer),
         GeomType::ErrorBar => Box::new(ErrorBarRenderer),
         GeomType::Rule => Box::new(RuleRenderer),
+        GeomType::Spatial => Box::new(SpatialRenderer),
         // All other geoms (Point, Area, Ribbon, Density, etc.) use the default renderer
         _ => Box::new(DefaultRenderer),
     }
