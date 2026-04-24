@@ -2876,4 +2876,34 @@ mod tests {
         assert!(prepared.data.contains_key(layer_key));
     }
 
+    #[cfg(all(feature = "duckdb", feature = "spatial"))]
+    #[test]
+    fn test_spatial_native_geometry() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = r#"
+            INSTALL spatial;
+            LOAD spatial;
+            SELECT
+                ST_GeomFromText('POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))') AS geom,
+                'A' AS name,
+                100 AS value
+            UNION ALL
+            SELECT
+                ST_GeomFromText('POLYGON ((1 0, 2 0, 2 1, 1 1, 1 0))') AS geom,
+                'B' AS name,
+                200 AS value
+            VISUALISE
+            DRAW spatial MAPPING geom AS geometry, value AS fill
+        "#;
+
+        let result = prepare_data_with_reader(query, &reader);
+        assert!(result.is_ok(), "Spatial with native GEOMETRY failed: {:?}", result.err());
+
+        let prepared = result.unwrap();
+        let layer_key = prepared.specs[0].layers[0].data_key.as_ref().unwrap();
+        let df = prepared.data.get(layer_key).unwrap();
+        assert_eq!(df.height(), 2);
+    }
+
 }

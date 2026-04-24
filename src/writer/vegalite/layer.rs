@@ -2111,43 +2111,78 @@ struct SpatialRenderer;
 
 #[cfg(feature = "spatial")]
 impl SpatialRenderer {
-    fn parse_geometry(value: &Value) -> Result<Value> {
-        match value {
-            Value::String(s) => {
-                let trimmed = s.trim();
-                if trimmed.starts_with('{') {
-                    serde_json::from_str(trimmed).map_err(|e| {
-                        GgsqlError::WriterError(format!("Invalid GeoJSON geometry: {}", e))
-                    })
-                } else {
-                    use geozero::geojson::GeoJsonWriter;
-                    use geozero::wkb::Wkb;
-                    use geozero::GeozeroGeometry;
-                    use std::io::Cursor;
+    fn wkb_to_geojson(wkb_bytes: &[u8]) -> Result<Value> {
+        use geozero::geojson::GeoJsonWriter;
+        use geozero::wkb::Wkb;
+        use geozero::GeozeroGeometry;
+        use std::io::Cursor;
 
-                    let hex_str = trimmed.strip_prefix("\\x").unwrap_or(trimmed);
-                    let wkb_bytes = hex::decode(hex_str).map_err(|e| {
-                        GgsqlError::WriterError(format!("Invalid WKB hex: {}", e))
+        let mut geojson_out = Vec::new();
+        let wkb = Wkb(wkb_bytes);
+        wkb.process_geom(&mut GeoJsonWriter::new(Cursor::new(&mut geojson_out)))
+            .map_err(|e| {
+                GgsqlError::WriterError(format!("Failed to convert WKB to GeoJSON: {}", e))
+            })?;
+
+        serde_json::from_slice(&geojson_out).map_err(|e| {
+            GgsqlError::WriterError(format!("Invalid GeoJSON from WKB: {}", e))
+        })
+    }
+
+    fn parse_geometry_from_string(s: &str) -> Result<Value> {
+        let trimmed = s.trim();
+        if trimmed.starts_with('{') {
+            serde_json::from_str(trimmed).map_err(|e| {
+                GgsqlError::WriterError(format!("Invalid GeoJSON geometry: {}", e))
+            })
+        } else {
+            let hex_str = trimmed.strip_prefix("\\x").unwrap_or(trimmed);
+            let wkb_bytes = hex::decode(hex_str).map_err(|e| {
+                GgsqlError::WriterError(format!("Invalid WKB hex: {}", e))
+            })?;
+            Self::wkb_to_geojson(&wkb_bytes)
+        }
+    }
+
+    fn parse_geometry_from_array(array: &arrow::array::ArrayRef, idx: usize) -> Result<Value> {
+        use arrow::datatypes::DataType;
+
+        if array.is_null(idx) {
+            return Ok(Value::Null);
+        }
+
+        match array.data_type() {
+            DataType::Binary => {
+                let bin = array
+                    .as_any()
+                    .downcast_ref::<arrow::array::BinaryArray>()
+                    .ok_or_else(|| {
+                        GgsqlError::WriterError("Failed to read geometry as Binary".into())
                     })?;
-
-                    let mut geojson_out = Vec::new();
-                    let wkb = Wkb(wkb_bytes.as_slice());
-                    wkb.process_geom(&mut GeoJsonWriter::new(Cursor::new(&mut geojson_out)))
-                        .map_err(|e| {
-                            GgsqlError::WriterError(format!(
-                                "Failed to convert WKB to GeoJSON: {}",
-                                e
-                            ))
-                        })?;
-
-                    serde_json::from_slice(&geojson_out).map_err(|e| {
-                        GgsqlError::WriterError(format!("Invalid GeoJSON from WKB: {}", e))
-                    })
-                }
+                Self::wkb_to_geojson(bin.value(idx))
             }
-            _ => Err(GgsqlError::WriterError(
-                "Geometry column must contain a string (GeoJSON or WKB hex)".to_string(),
-            )),
+            DataType::LargeBinary => {
+                let bin = array
+                    .as_any()
+                    .downcast_ref::<arrow::array::LargeBinaryArray>()
+                    .ok_or_else(|| {
+                        GgsqlError::WriterError("Failed to read geometry as LargeBinary".into())
+                    })?;
+                Self::wkb_to_geojson(bin.value(idx))
+            }
+            DataType::Utf8 => {
+                let str_arr = array
+                    .as_any()
+                    .downcast_ref::<arrow::array::StringArray>()
+                    .ok_or_else(|| {
+                        GgsqlError::WriterError("Failed to read geometry as String".into())
+                    })?;
+                Self::parse_geometry_from_string(str_arr.value(idx))
+            }
+            other => Err(GgsqlError::WriterError(format!(
+                "Geometry column has unsupported type {:?}; expected Binary or String (GeoJSON/WKB hex)",
+                other
+            ))),
         }
     }
 }
@@ -2192,13 +2227,11 @@ impl GeomRenderer for SpatialRenderer {
                             ))
                         })?;
 
-                    let value =
-                        super::data::series_value_at(col, row_idx)?;
-
                     if *col_name == geometry_col {
-                        let geom = Self::parse_geometry(&value)?;
+                        let geom = Self::parse_geometry_from_array(col, row_idx)?;
                         feature.insert("geometry".to_string(), geom);
                     } else {
+                        let value = super::data::series_value_at(col, row_idx)?;
                         properties.insert(col_name.clone(), value.clone());
                         feature.insert(col_name.clone(), value);
                     }
