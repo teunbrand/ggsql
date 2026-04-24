@@ -1218,4 +1218,24 @@ mod tests {
             "None mapping should suppress label (empty string), got: {expr}"
         );
     }
+
+    #[test]
+    fn test_literal_shape_converts_to_svg_path() {
+        let lit = ParameterValue::String("square".to_string());
+        let result = build_literal_encoding("shape", &lit).unwrap();
+        let val = &result["value"];
+        assert!(val.is_string(), "expected SVG path string, got: {val}");
+        let path = val.as_str().unwrap();
+        assert!(
+            path.starts_with('M') && path.contains('Z'),
+            "expected SVG path with M and Z commands, got: {path}"
+        );
+    }
+
+    #[test]
+    fn test_literal_shape_unknown_passes_through() {
+        let lit = ParameterValue::String("nonexistent".to_string());
+        let result = build_literal_encoding("shape", &lit).unwrap();
+        assert_eq!(result, json!({"value": "nonexistent"}));
+    }
 }
