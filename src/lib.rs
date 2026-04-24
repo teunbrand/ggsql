@@ -1020,7 +1020,7 @@ mod integration_tests {
                 'South' AS region,
                 150 AS population
             VISUALISE
-            DRAW spatial MAPPING geom AS geometry, population AS fill
+            DRAW spatial MAPPING population AS fill
         "#;
 
         let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
