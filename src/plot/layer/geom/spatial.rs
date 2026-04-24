@@ -41,12 +41,10 @@ impl GeomTrait for Spatial {
             execute_query(&stmt)?;
         }
 
-        // Geometry columns use database-native types that don't have an Arrow equivalent.
-        // Convert to standard WKB so the writer can parse them with geozero.
         let col = naming::quote_ident(&naming::aesthetic_column("geometry"));
         let wkb_expr = dialect.sql_geometry_to_wkb(&col);
         Ok(StatResult::Transformed {
-            query: format!("SELECT * REPLACE ({wkb_expr} AS {col}) FROM ({query})",),
+            query: format!("SELECT * REPLACE ({wkb_expr} AS {col}) FROM ({query})"),
             stat_columns: vec![],
             dummy_columns: vec![],
             consumed_aesthetics: vec![],

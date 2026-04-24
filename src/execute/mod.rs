@@ -2977,4 +2977,22 @@ mod tests {
         assert_eq!(df.height(), 2);
         assert!(df.column("__ggsql_aes_geometry__").is_ok());
     }
+
+    #[cfg(all(feature = "duckdb", feature = "spatial", feature = "builtin-data"))]
+    #[test]
+    fn test_spatial_world_minimal() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = r#"
+            VISUALISE FROM ggsql:world
+            DRAW spatial
+        "#;
+
+        let result = prepare_data_with_reader(query, &reader);
+        assert!(
+            result.is_ok(),
+            "ggsql:world DRAW spatial failed: {:?}",
+            result.err()
+        );
+    }
 }

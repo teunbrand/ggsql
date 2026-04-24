@@ -76,6 +76,13 @@ pub fn register_builtin_datasets_duckdb(
     use std::{env, fs};
 
     let dataset_names = extract_builtin_dataset_names(sql)?;
+
+    // Load spatial extension before registering datasets that contain
+    // geometry columns, so DuckDB reads them as GEOMETRY rather than BLOB.
+    if dataset_names.iter().any(|n| n == "world") {
+        let _ = conn.execute("LOAD spatial", duckdb::params![]);
+    }
+
     for name in dataset_names {
         let Some(parquet_bytes) = builtin_parquet_bytes(&name) else {
             continue;
