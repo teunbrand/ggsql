@@ -955,12 +955,14 @@ fn build_column_encoding(
 /// Build encoding for a literal aesthetic value
 fn build_literal_encoding(aesthetic: &str, lit: &ParameterValue) -> Result<Value> {
     let val = match lit {
-        ParameterValue::String(s) => match aesthetic {
-            "linetype" => linetype_to_stroke_dash(s)
-                .map(|arr| json!(arr))
-                .unwrap_or_else(|| json!(s)),
-            _ => json!(s),
-        },
+        ParameterValue::String(s) => {
+            let converted = match aesthetic {
+                "linetype" => linetype_to_stroke_dash(s).map(|arr| json!(arr)),
+                "shape" => shape_to_svg_path(s).map(|arr| json!(arr)),
+                _ => None,
+            };
+            converted.unwrap_or_else(|| json!(s))
+        }
         ParameterValue::Number(n) => {
             match aesthetic {
                 // Size: radius (points) → area (pixels²)
