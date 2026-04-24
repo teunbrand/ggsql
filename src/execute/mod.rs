@@ -2982,6 +2982,7 @@ mod tests {
     #[test]
     fn test_spatial_world_minimal() {
         let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+        reader.execute_sql("INSTALL spatial").unwrap();
 
         let query = r#"
             VISUALISE FROM ggsql:world
