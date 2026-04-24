@@ -1504,7 +1504,6 @@ dependencies = [
  "csscolorparser",
  "duckdb",
  "geozero",
- "hex",
  "jsonschema",
  "odbc-api",
  "palette",

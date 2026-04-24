@@ -42,7 +42,6 @@ plotters = { workspace = true, optional = true }
 
 # Spatial
 geozero = { workspace = true, optional = true, features = ["with-wkb", "with-geojson"] }
-hex = { workspace = true, optional = true }
 
 # Serialization
 serde.workspace = true
@@ -75,7 +74,7 @@ parquet = ["dep:parquet"]
 postgres = ["dep:postgres"]
 sqlite = ["dep:rusqlite"]
 odbc = ["dep:odbc-api", "dep:toml_edit"]
-spatial = ["dep:geozero", "dep:hex"]
+spatial = ["dep:geozero"]
 vegalite = []
 ggplot2 = []
 builtin-data = []

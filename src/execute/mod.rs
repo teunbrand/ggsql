@@ -1375,7 +1375,6 @@ pub fn prepare_data_with_reader(query: &str, reader: &dyn Reader) -> Result<Prep
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plot::layer::geom::GeomType;
 
     #[cfg(feature = "duckdb")]
     #[test]
@@ -2851,36 +2850,6 @@ mod tests {
             "Error should not mention internal name 'pos1min', got: {}",
             err_msg
         );
-    }
-
-    #[cfg(all(feature = "duckdb", feature = "spatial"))]
-    #[test]
-    fn test_spatial_explicit_geojson_string() {
-        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
-
-        let query = r#"
-            SELECT
-                '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}' as geom,
-                'A' as name,
-                100 as value
-            VISUALISE
-            DRAW spatial MAPPING geom AS geometry, value AS fill
-        "#;
-
-        let result = prepare_data_with_reader(query, &reader);
-        assert!(result.is_ok(), "Spatial with explicit GeoJSON failed: {:?}", result.err());
-
-        let prepared = result.unwrap();
-        assert_eq!(prepared.specs[0].layers[0].geom.geom_type(), GeomType::Spatial);
-        assert!(
-            prepared.specs[0].layers[0]
-                .mappings
-                .aesthetics
-                .contains_key("geometry"),
-            "geometry aesthetic should be present"
-        );
-        let layer_key = prepared.specs[0].layers[0].data_key.as_ref().unwrap();
-        assert!(prepared.data.contains_key(layer_key));
     }
 
     #[cfg(all(feature = "duckdb", feature = "spatial"))]

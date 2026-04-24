@@ -2129,21 +2129,6 @@ impl SpatialRenderer {
         })
     }
 
-    fn parse_geometry_from_string(s: &str) -> Result<Value> {
-        let trimmed = s.trim();
-        if trimmed.starts_with('{') {
-            serde_json::from_str(trimmed).map_err(|e| {
-                GgsqlError::WriterError(format!("Invalid GeoJSON geometry: {}", e))
-            })
-        } else {
-            let hex_str = trimmed.strip_prefix("\\x").unwrap_or(trimmed);
-            let wkb_bytes = hex::decode(hex_str).map_err(|e| {
-                GgsqlError::WriterError(format!("Invalid WKB hex: {}", e))
-            })?;
-            Self::wkb_to_geojson(&wkb_bytes)
-        }
-    }
-
     fn parse_geometry_from_array(array: &arrow::array::ArrayRef, idx: usize) -> Result<Value> {
         use arrow::datatypes::DataType;
 
@@ -2170,17 +2155,8 @@ impl SpatialRenderer {
                     })?;
                 Self::wkb_to_geojson(bin.value(idx))
             }
-            DataType::Utf8 => {
-                let str_arr = array
-                    .as_any()
-                    .downcast_ref::<arrow::array::StringArray>()
-                    .ok_or_else(|| {
-                        GgsqlError::WriterError("Failed to read geometry as String".into())
-                    })?;
-                Self::parse_geometry_from_string(str_arr.value(idx))
-            }
             other => Err(GgsqlError::WriterError(format!(
-                "Geometry column has unsupported type {:?}; expected Binary or String (GeoJSON/WKB hex)",
+                "Geometry column has unsupported type {:?}; expected Binary (WKB)",
                 other
             ))),
         }
