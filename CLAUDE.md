@@ -90,6 +90,12 @@ cd ggsql-jupyter/tests && pip install -r requirements.txt && pytest
 
 Per-folder CLAUDE.md files cover component-specific test guidance.
 
+## Coding style
+
+- **Reuse existing infrastructure and architectural choices.** When adding new code, prefer extending or adapting what is already there over introducing a parallel implementation. If reuse requires changes elsewhere to accommodate the new caller, that is more palatable than implementing the same thing twice.
+- **Comments describe the current state of the code.** Do not reference past states, how something used to work, what was changed, or why an earlier approach was abandoned — that history belongs in commit messages and [`CHANGELOG.md`](CHANGELOG.md).
+- **[`CHANGELOG.md`](CHANGELOG.md) is the record of user-visible change over time.** Consult it when you need to know when something landed or how behaviour evolved. Update it when adding a feature, changing behaviour, or removing something — but write **one entry per feature**, added when the feature is complete. Don't gradually accrete bullets during development.
+
 ## Where to ask which question
 
 - *What does clause/layer/scale X do?* → [`doc/syntax/`](doc/syntax/).
