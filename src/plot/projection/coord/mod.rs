@@ -25,7 +25,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::plot::types::{validate_parameter, ParamDefinition};
-use crate::plot::ParameterValue;
+use crate::plot::{Layer, ParameterValue};
+use crate::reader::SqlDialect;
+use crate::DataFrame;
 
 // Coord type implementations
 mod cartesian;
@@ -126,6 +128,25 @@ pub trait CoordTrait: std::fmt::Debug + std::fmt::Display + Send + Sync {
 
         Ok(resolved)
     }
+
+    /// Orchestrate projection transforms for all layers.
+    ///
+    /// Iterates layers and calls each geom's `apply_projection()`.
+    /// Override to add coord-specific setup (e.g., Map loads the spatial extension).
+    fn apply_projection_transforms(
+        &self,
+        layers: &[Layer],
+        layer_queries: &mut [String],
+        projection: &super::Projection,
+        dialect: &dyn SqlDialect,
+        _execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+    ) -> crate::Result<()> {
+        for (idx, layer) in layers.iter().enumerate() {
+            layer_queries[idx] =
+                layer.geom.apply_projection(&layer_queries[idx], projection, dialect)?;
+        }
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -191,6 +212,19 @@ impl Coord {
         properties: &HashMap<String, ParameterValue>,
     ) -> Result<HashMap<String, ParameterValue>, String> {
         self.0.resolve_properties(properties)
+    }
+
+    /// Orchestrate projection transforms for all layers.
+    pub fn apply_projection_transforms(
+        &self,
+        layers: &[Layer],
+        layer_queries: &mut [String],
+        projection: &super::Projection,
+        dialect: &dyn SqlDialect,
+        execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+    ) -> crate::Result<()> {
+        self.0
+            .apply_projection_transforms(layers, layer_queries, projection, dialect, execute_query)
     }
 }
 

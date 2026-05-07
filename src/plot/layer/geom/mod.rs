@@ -74,6 +74,7 @@ pub use text::Text;
 pub use tile::Tile;
 pub use violin::Violin;
 
+use crate::plot::projection::Projection;
 use crate::plot::types::{ParameterValue, Schema};
 use crate::reader::SqlDialect;
 
@@ -227,6 +228,23 @@ pub trait GeomTrait: std::fmt::Debug + std::fmt::Display + Send + Sync {
         _parameters: &HashMap<String, ParameterValue>,
     ) -> Result<DataFrame> {
         Ok(df)
+    }
+
+    /// Apply coord-specific projection transformations to a layer query.
+    ///
+    /// Called after stat transforms, before data fetch. Each geom decides what
+    /// projection means for its parameterization:
+    /// - Spatial: ST_AsWKB (always), plus ST_Transform when Map coord has a CRS
+    /// - Future geoms: rectangles transform corners, lines segmentize, etc.
+    ///
+    /// The default is a no-op (returns query unchanged).
+    fn apply_projection(
+        &self,
+        query: &str,
+        _projection: &Projection,
+        _dialect: &dyn SqlDialect,
+    ) -> Result<String> {
+        Ok(query.to_string())
     }
 
     /// Adjust layer mappings and parameters based on geom-specific logic.
@@ -449,6 +467,16 @@ impl Geom {
         parameters: &HashMap<String, ParameterValue>,
     ) -> Result<DataFrame> {
         self.0.post_process(df, parameters)
+    }
+
+    /// Apply coord-specific projection transformations
+    pub fn apply_projection(
+        &self,
+        query: &str,
+        projection: &Projection,
+        dialect: &dyn SqlDialect,
+    ) -> Result<String> {
+        self.0.apply_projection(query, projection, dialect)
     }
 
     /// Adjust layer mappings and parameters based on geom-specific logic
