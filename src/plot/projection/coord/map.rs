@@ -2,6 +2,9 @@
 
 use super::{CoordKind, CoordTrait};
 use crate::plot::types::{DefaultParamValue, ParamConstraint, ParamDefinition};
+use crate::plot::Layer;
+use crate::reader::SqlDialect;
+use crate::DataFrame;
 
 /// Map coordinate system - for geographic/cartographic projections
 #[derive(Debug, Clone, Copy)]
@@ -34,6 +37,25 @@ impl CoordTrait for Map {
             },
         ];
         PARAMS
+    }
+
+    fn apply_projection_transforms(
+        &self,
+        layers: &[Layer],
+        layer_queries: &mut [String],
+        projection: &super::super::Projection,
+        dialect: &dyn SqlDialect,
+        execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+    ) -> crate::Result<()> {
+        for stmt in dialect.sql_spatial_setup() {
+            execute_query(&stmt)?;
+        }
+
+        for (idx, layer) in layers.iter().enumerate() {
+            layer_queries[idx] =
+                layer.geom.apply_projection(&layer_queries[idx], projection, dialect)?;
+        }
+        Ok(())
     }
 }
 
