@@ -1,5 +1,7 @@
 //! Map coordinate system implementation
 
+use std::collections::HashMap;
+
 use super::{CoordKind, CoordTrait};
 use crate::naming;
 use crate::plot::layer::geom::GeomType;
@@ -79,6 +81,108 @@ impl std::fmt::Display for Map {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())
     }
+}
+
+/// Returns a WKT POLYGON representing the visible hemisphere for the given projection
+/// properties, or `None` if the projection doesn't require horizon clipping.
+///
+/// The polygon is a 72-vertex haversine boundary at 88° great-circle radius from the
+/// projection center (`lon_0`, `lat_0`). Azimuthal projections (orthographic, gnomonic)
+/// only display one hemisphere; geometry beyond this boundary produces degenerate output
+/// after `ST_Transform` and must be clipped.
+pub fn visible_area_wkt(properties: &HashMap<String, ParameterValue>) -> Option<String> {
+    let crs = match properties.get("crs") {
+        Some(ParameterValue::String(s)) => s,
+        _ => return None,
+    };
+
+    if !needs_horizon_clip(crs) {
+        return None;
+    }
+
+    let center = projection_center(crs);
+    Some(hemisphere_polygon_wkt(center.0, center.1, 88.0))
+}
+
+fn needs_horizon_clip(crs: &str) -> bool {
+    let lower = crs.to_ascii_lowercase();
+    lower.contains("+proj=ortho") || lower.contains("+proj=gnom")
+}
+
+fn projection_center(crs: &str) -> (f64, f64) {
+    let lon = extract_proj_param(crs, "+lon_0=").unwrap_or(0.0);
+    let lat = extract_proj_param(crs, "+lat_0=").unwrap_or(0.0);
+    (lon, lat)
+}
+
+fn extract_proj_param(crs: &str, key: &str) -> Option<f64> {
+    crs.find(key).and_then(|start| {
+        let after = &crs[start + key.len()..];
+        let end = after.find(|c: char| c == ' ' || c == '+').unwrap_or(after.len());
+        after[..end].parse().ok()
+    })
+}
+
+/// Haversine boundary polygon at `radius_deg` from `(lon0, lat0)`, as WKT.
+/// Routes through ±90° latitude when the boundary includes a pole.
+fn hemisphere_polygon_wkt(lon0: f64, lat0: f64, radius_deg: f64) -> String {
+    let d = radius_deg.to_radians();
+    let lat0_r = lat0.to_radians();
+    let sin_lat0 = lat0_r.sin();
+    let cos_lat0 = lat0_r.cos();
+    let sin_d = d.sin();
+    let cos_d = d.cos();
+
+    let n_points = 72;
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity(n_points);
+    for i in 0..n_points {
+        let az = (i as f64 * 5.0).to_radians();
+        let lat2 = (sin_lat0 * cos_d + cos_lat0 * sin_d * az.cos()).asin();
+        let lon2 =
+            lon0.to_radians() + (az.sin() * sin_d * cos_lat0).atan2(cos_d - sin_lat0 * lat2.sin());
+        points.push((lon2.to_degrees(), lat2.to_degrees()));
+    }
+
+    let includes_north_pole = lat0 + radius_deg > 90.0;
+    let includes_south_pole = lat0 - radius_deg < -90.0;
+
+    let mut coords: Vec<String> = Vec::with_capacity(n_points + 4);
+
+    if includes_north_pole || includes_south_pole {
+        let mut split_idx = 0;
+        let mut max_jump = 0.0_f64;
+        for i in 0..points.len() {
+            let next = (i + 1) % points.len();
+            let jump = (points[next].0 - points[i].0).abs();
+            if jump > max_jump {
+                max_jump = jump;
+                split_idx = next;
+            }
+        }
+
+        let mut ordered: Vec<(f64, f64)> = Vec::with_capacity(points.len());
+        for i in 0..points.len() {
+            ordered.push(points[(split_idx + i) % points.len()]);
+        }
+
+        let pole_lat = if includes_north_pole { 90.0 } else { -90.0 };
+        let first = ordered.first().unwrap();
+        let last = ordered.last().unwrap();
+
+        for (lon, lat) in &ordered {
+            coords.push(format!("{lon:.6} {lat:.6}"));
+        }
+        coords.push(format!("{:.6} {pole_lat:.6}", last.0));
+        coords.push(format!("{:.6} {pole_lat:.6}", first.0));
+        coords.push(format!("{:.6} {:.6}", first.0, first.1));
+    } else {
+        for (lon, lat) in &points {
+            coords.push(format!("{lon:.6} {lat:.6}"));
+        }
+        coords.push(coords[0].clone());
+    }
+
+    format!("POLYGON(({}))", coords.join(", "))
 }
 
 fn detect_source_srid(
@@ -172,5 +276,45 @@ mod tests {
         assert!(resolved.is_err());
         let err = resolved.unwrap_err();
         assert!(err.contains("not 'unknown'"));
+    }
+
+    #[test]
+    fn test_visible_area_wkt_orthographic() {
+        let mut props = HashMap::new();
+        props.insert(
+            "crs".to_string(),
+            ParameterValue::String("+proj=ortho +lat_0=45 +lon_0=10".to_string()),
+        );
+        let wkt = visible_area_wkt(&props);
+        assert!(wkt.is_some());
+        let wkt = wkt.unwrap();
+        assert!(wkt.starts_with("POLYGON(("));
+        assert!(wkt.ends_with("))"));
+    }
+
+    #[test]
+    fn test_visible_area_wkt_gnomonic() {
+        let mut props = HashMap::new();
+        props.insert(
+            "crs".to_string(),
+            ParameterValue::String("+proj=gnom +lat_0=90 +lon_0=0".to_string()),
+        );
+        assert!(visible_area_wkt(&props).is_some());
+    }
+
+    #[test]
+    fn test_visible_area_wkt_mercator_returns_none() {
+        let mut props = HashMap::new();
+        props.insert(
+            "crs".to_string(),
+            ParameterValue::String("+proj=merc".to_string()),
+        );
+        assert!(visible_area_wkt(&props).is_none());
+    }
+
+    #[test]
+    fn test_visible_area_wkt_no_crs_returns_none() {
+        let props = HashMap::new();
+        assert!(visible_area_wkt(&props).is_none());
     }
 }

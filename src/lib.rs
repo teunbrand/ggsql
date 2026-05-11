@@ -1044,6 +1044,7 @@ mod integration_tests {
         assert_eq!(feature["geometry"]["type"], "Polygon");
     }
 
+    #[cfg(feature = "spatial")]
     #[test]
     fn test_end_to_end_spatial_world_orthographic() {
         let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
@@ -1068,9 +1069,11 @@ mod integration_tests {
             .filter(|r| r[naming::SOURCE_COLUMN] == layer_key.as_str())
             .collect();
         assert!(!spatial_rows.is_empty());
-        // Orthographic clips the back hemisphere — some features have null geometry
-        assert!(spatial_rows.iter().any(|r| r["geometry"].is_null()));
-        assert!(spatial_rows.iter().any(|r| !r["geometry"].is_null()));
+        // Horizon clipping filters out back-of-globe features; all remaining have geometry
+        assert!(
+            spatial_rows.iter().all(|r| !r["geometry"].is_null()),
+            "all visible features should have valid geometry"
+        );
     }
 
     /// Belt-and-braces regression test: a representative basket of error-
@@ -1170,5 +1173,30 @@ mod integration_tests {
                 }
             }
         }
+    }
+
+    #[cfg(feature = "spatial")]
+    #[test]
+    fn test_orthographic_amsterdam_center() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+
+        let query = r#"
+            VISUALISE FROM ggsql:world
+            DRAW spatial PROJECT TO map SETTING crs => '+proj=ortho +lon_0=4.90 +lat_0=52.36'
+        "#;
+
+        let prepared = execute::prepare_data_with_reader(query, &reader).unwrap();
+        let writer = VegaLiteWriter::new();
+        let json_str = writer.write(&prepared.specs[0], &prepared.data).unwrap();
+        let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let data = vl_spec["data"]["values"].as_array().unwrap();
+        let layer_key = prepared.specs[0].layers[0].data_key.as_ref().unwrap();
+        let spatial_rows: Vec<_> = data
+            .iter()
+            .filter(|r| r[naming::SOURCE_COLUMN] == layer_key.as_str())
+            .collect();
+        assert!(!spatial_rows.is_empty());
+        assert!(spatial_rows.iter().any(|r| !r["geometry"].is_null()));
     }
 }

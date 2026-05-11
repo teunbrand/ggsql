@@ -1,10 +1,40 @@
 use super::{DefaultAesthetics, GeomTrait, GeomType};
 use crate::naming;
+use crate::plot::projection::coord::map::visible_area_wkt;
 use crate::plot::projection::coord::CoordKind;
 use crate::plot::projection::Projection;
 use crate::plot::types::DefaultAestheticValue;
 use crate::plot::ParameterValue;
 use crate::reader::SqlDialect;
+
+fn apply_horizon_clip(
+    query: &str,
+    col: &str,
+    source: &str,
+    crs: &str,
+    horizon_sql: &str,
+    dialect: &dyn SqlDialect,
+) -> String {
+    let geom_expr = format!(
+        "ST_MakeValid(ST_Transform(\
+            ST_Intersection({col}, ({horizon})),\
+            '{source}', '{crs}', always_xy := true\
+        ))",
+        col = col,
+        horizon = horizon_sql,
+        source = source.replace('\'', "''"),
+        crs = crs.replace('\'', "''"),
+    );
+    let wkb_expr = dialect.sql_geometry_to_wkb(&geom_expr);
+    format!(
+        "SELECT * REPLACE ({wkb_expr} AS {col}) FROM ({query}) \
+         WHERE ST_Intersects({col}, ({horizon}))",
+        col = col,
+        wkb_expr = wkb_expr,
+        query = query,
+        horizon = horizon_sql,
+    )
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Spatial;
@@ -43,6 +73,12 @@ impl GeomTrait for Spatial {
                 Some(ParameterValue::String(s)) => s.as_str(),
                 _ => "EPSG:4326",
             };
+
+            if let Some(wkt) = visible_area_wkt(&projection.properties) {
+                let horizon_sql = format!("ST_GeomFromText('{wkt}')");
+                return Ok(apply_horizon_clip(query, &col, source, crs, &horizon_sql, dialect));
+            }
+
             dialect.sql_st_transform(&col, source, crs)
         } else {
             col.clone()
@@ -65,7 +101,6 @@ impl std::fmt::Display for Spatial {
 mod tests {
     use super::*;
     use crate::reader::AnsiDialect;
-    // Note: in AnsiDialect ST_AsBinary is the function to get WKB.
 
     #[test]
     fn test_apply_projection_without_map_coord() {
@@ -106,5 +141,41 @@ mod tests {
         assert!(result.contains("ST_AsBinary"));
         assert!(result.contains("ST_Transform"));
         assert!(result.contains("+proj=merc"));
+        assert!(!result.contains("ST_Intersection"), "mercator should not clip");
+    }
+
+    #[test]
+    fn test_orthographic_gets_horizon_clip() {
+        let spatial = Spatial;
+        let mut projection = Projection::map();
+        projection.properties.insert(
+            "crs".to_string(),
+            ParameterValue::String("+proj=ortho +lat_0=45 +lon_0=10".to_string()),
+        );
+        let result = spatial
+            .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
+            .unwrap();
+
+        assert!(result.contains("ST_Transform"));
+        assert!(result.contains("ST_MakeValid"));
+        assert!(result.contains("ST_Intersection"));
+        assert!(result.contains("ST_Intersects"));
+    }
+
+    #[test]
+    fn test_gnomonic_gets_horizon_clip() {
+        let spatial = Spatial;
+        let mut projection = Projection::map();
+        projection.properties.insert(
+            "crs".to_string(),
+            ParameterValue::String("+proj=gnom +lat_0=90 +lon_0=0".to_string()),
+        );
+        let result = spatial
+            .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
+            .unwrap();
+
+        assert!(result.contains("ST_MakeValid"));
+        assert!(result.contains("ST_Intersection"));
+        assert!(result.contains("ST_Intersects"));
     }
 }

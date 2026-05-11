@@ -31,7 +31,7 @@ use crate::DataFrame;
 
 // Coord type implementations
 mod cartesian;
-mod map;
+pub mod map;
 mod polar;
 
 // Re-export coord type structs
