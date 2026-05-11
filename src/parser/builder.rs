@@ -1024,6 +1024,7 @@ fn build_project(node: &Node, source: &SourceTree) -> Result<Projection> {
         coord,
         aesthetics,
         properties,
+        computed: HashMap::new(),
     })
 }
 

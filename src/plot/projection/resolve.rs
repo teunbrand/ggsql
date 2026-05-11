@@ -76,6 +76,7 @@ pub fn resolve_coord(
             coord,
             aesthetics,
             properties: HashMap::new(),
+            computed: HashMap::new(),
         }));
     }
 
@@ -91,6 +92,7 @@ pub fn resolve_coord(
             coord,
             aesthetics,
             properties: HashMap::new(),
+            computed: HashMap::new(),
         }));
     }
 
@@ -137,6 +139,8 @@ fn strip_position_suffix(name: &str) -> &str {
 /// - **`radar`** (polar only): When null (auto), sets to `true` if the theta
 ///   (pos2) scale is discrete/ordinal. When explicitly `true`, validates that
 ///   the theta scale is indeed discrete.
+/// - **clip boundary** (map only): Computes the visible-area WKT polygon for
+///   azimuthal projections and stores it in `computed`.
 pub fn resolve_projection_properties(
     project: &mut Projection,
     scales: &[Scale],

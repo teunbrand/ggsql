@@ -22,6 +22,10 @@ pub struct Projection {
     pub aesthetics: Vec<String>,
     /// Projection-specific options
     pub properties: HashMap<String, ParameterValue>,
+    /// Values computed at execution time (e.g., clip boundary WKT).
+    /// Not user-facing; populated by apply_projection_transforms.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub computed: HashMap<String, ParameterValue>,
 }
 
 impl Projection {
@@ -50,6 +54,7 @@ impl Projection {
             coord,
             aesthetics,
             properties: HashMap::new(),
+            computed: HashMap::new(),
         }
     }
 

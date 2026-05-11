@@ -1,6 +1,6 @@
 use super::{DefaultAesthetics, GeomTrait, GeomType};
 use crate::naming;
-use crate::plot::projection::coord::map::CLIP_BOUNDARY_KEY;
+use crate::plot::projection::coord::map::CLIP_BOUNDARY_TABLE;
 use crate::plot::projection::coord::CoordKind;
 use crate::plot::projection::Projection;
 use crate::plot::types::DefaultAestheticValue;
@@ -75,11 +75,9 @@ impl GeomTrait for Spatial {
                 _ => "EPSG:4326",
             };
 
-            if let Some(ParameterValue::String(clip_table)) =
-                projection.properties.get(CLIP_BOUNDARY_KEY)
-            {
+            if projection.computed.contains_key("clip_boundary") {
                 return Ok(apply_clip_boundary(
-                    query, &col, source, crs, clip_table, dialect,
+                    query, &col, source, crs, CLIP_BOUNDARY_TABLE, dialect,
                 ));
             }
 
@@ -156,9 +154,9 @@ mod tests {
             "crs".to_string(),
             ParameterValue::String("+proj=ortho +lat_0=45 +lon_0=10".to_string()),
         );
-        projection.properties.insert(
-            CLIP_BOUNDARY_KEY.to_string(),
-            ParameterValue::String("__ggsql_clip_boundary__".to_string()),
+        projection.computed.insert(
+            "clip_boundary".to_string(),
+            ParameterValue::String("POLYGON((...))".to_string()),
         );
         let result = spatial
             .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
@@ -179,9 +177,9 @@ mod tests {
             "crs".to_string(),
             ParameterValue::String("+proj=gnom +lat_0=90 +lon_0=0".to_string()),
         );
-        projection.properties.insert(
-            CLIP_BOUNDARY_KEY.to_string(),
-            ParameterValue::String("__ggsql_clip_boundary__".to_string()),
+        projection.computed.insert(
+            "clip_boundary".to_string(),
+            ParameterValue::String("POLYGON((...))".to_string()),
         );
         let result = spatial
             .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
