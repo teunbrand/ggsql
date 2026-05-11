@@ -176,16 +176,34 @@ fn hemisphere_polygon_wkt(lon0: f64, lat0: f64, radius_deg: f64) -> String {
     let cos_d = d.cos();
 
     let n_points = 72;
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(n_points);
+    let mut raw_points: Vec<(f64, f64)> = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        let az = (i as f64 * 5.0).to_radians();
+        let az = (i as f64 * (360.0 / n_points as f64)).to_radians();
         let lat2 = (sin_lat0 * cos_d + cos_lat0 * sin_d * az.cos()).asin();
         let lon2 =
             lon0.to_radians() + (az.sin() * sin_d * cos_lat0).atan2(cos_d - sin_lat0 * lat2.sin());
         let mut lon_deg = lon2.to_degrees();
         // Normalize to [-180, 180]
         lon_deg = ((lon_deg + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
-        points.push((lon_deg, lat2.to_degrees()));
+        raw_points.push((lon_deg, lat2.to_degrees()));
+    }
+
+    // Insert exact antimeridian vertices where consecutive points cross ±180°.
+    // Uses 179.999999 to avoid ambiguity while placing vertices at the boundary.
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity(n_points + 4);
+    for i in 0..raw_points.len() {
+        points.push(raw_points[i]);
+        let next = (i + 1) % raw_points.len();
+        if (raw_points[next].0 - raw_points[i].0).abs() > 180.0 {
+            let lat = antimeridian_crossing_lat(raw_points[i], raw_points[next]);
+            if raw_points[i].0 > 0.0 {
+                points.push((179.999999, lat));
+                points.push((-179.999999, lat));
+            } else {
+                points.push((-179.999999, lat));
+                points.push((179.999999, lat));
+            }
+        }
     }
 
     let includes_north_pole = lat0 + radius_deg > 90.0;
@@ -231,11 +249,17 @@ fn build_pole_polygon(points: &[(f64, f64)], north: bool) -> String {
     let first = ordered.first().unwrap();
     let last = ordered.last().unwrap();
 
-    let mut coords: Vec<String> = Vec::with_capacity(points.len() + 4);
+    let mut coords: Vec<String> = Vec::with_capacity(points.len() + 6);
     for (lon, lat) in &ordered {
         coords.push(format!("{lon:.6} {lat:.6}"));
     }
     coords.push(format!("{:.6} {pole_lat:.6}", last.0));
+    // If the closure would jump > 180° in longitude, add an intermediate
+    // vertex so no single edge crosses the antimeridian.
+    if (last.0 - first.0).abs() > 180.0 {
+        let mid = (last.0 + first.0) / 2.0;
+        coords.push(format!("{mid:.6} {pole_lat:.6}"));
+    }
     coords.push(format!("{:.6} {pole_lat:.6}", first.0));
     coords.push(format!("{:.6} {:.6}", first.0, first.1));
 
@@ -514,7 +538,7 @@ mod tests {
             ParameterValue::String("+proj=ortho +lat_0=52.36 +lon_0=150.90".to_string()),
         );
         let wkt = visible_area_wkt(&props).unwrap();
-        // Includes north pole (52.36 + 88 > 90), ring has one big jump → pole-routing.
+        // Includes north pole (52.36 + 88 > 90), pole-routing produces a POLYGON.
         assert!(
             wkt.starts_with("POLYGON(("),
             "pole case should produce POLYGON: {wkt}"
