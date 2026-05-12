@@ -13,7 +13,6 @@ fn apply_clip_boundary(
     source: &str,
     crs: &str,
     clip_table: &str,
-    dialect: &dyn SqlDialect,
 ) -> String {
     let clip_geom = format!("(SELECT geom FROM {clip_table})");
     let geom_expr = format!(
@@ -26,12 +25,11 @@ fn apply_clip_boundary(
         source = source.replace('\'', "''"),
         crs = crs.replace('\'', "''"),
     );
-    let wkb_expr = dialect.sql_geometry_to_wkb(&geom_expr);
     format!(
-        "SELECT * REPLACE ({wkb_expr} AS {col}) FROM ({query}) \
+        "SELECT * REPLACE ({geom_expr} AS {col}) FROM ({query}) \
          WHERE ST_Intersects({col}, {clip_geom})",
         col = col,
-        wkb_expr = wkb_expr,
+        geom_expr = geom_expr,
         query = query,
         clip_geom = clip_geom,
     )
@@ -65,11 +63,11 @@ impl GeomTrait for Spatial {
         dialect: &dyn SqlDialect,
     ) -> crate::Result<String> {
         let col = naming::quote_ident(&naming::aesthetic_column("geometry"));
+        let is_map = projection.coord.coord_kind() == CoordKind::Map;
 
-        let geom_expr = if let (CoordKind::Map, Some(ParameterValue::String(crs))) = (
-            projection.coord.coord_kind(),
-            projection.properties.get("crs"),
-        ) {
+        let geom_expr = if let (true, Some(ParameterValue::String(crs))) =
+            (is_map, projection.properties.get("crs"))
+        {
             let source = match projection.properties.get("source") {
                 Some(ParameterValue::String(s)) => s.as_str(),
                 _ => "EPSG:4326",
@@ -77,18 +75,25 @@ impl GeomTrait for Spatial {
 
             if projection.computed.contains_key("clip_boundary") {
                 return Ok(apply_clip_boundary(
-                    query, &col, source, crs, CLIP_BOUNDARY_TABLE, dialect,
+                    query, &col, source, crs, CLIP_BOUNDARY_TABLE,
                 ));
             }
 
             dialect.sql_st_transform(&col, source, crs)
+        } else if is_map {
+            // Map coord without CRS — keep native geometry (WKB added later by framing)
+            return Ok(query.to_string());
         } else {
-            col.clone()
+            // Non-map coord — convert to WKB directly
+            let wkb_expr = dialect.sql_geometry_to_wkb(&col);
+            return Ok(format!(
+                "SELECT * REPLACE ({wkb_expr} AS {col}) FROM ({query})"
+            ));
         };
 
-        let wkb_expr = dialect.sql_geometry_to_wkb(&geom_expr);
+        // Map coord with CRS — output native projected geometry (WKB added by framing)
         Ok(format!(
-            "SELECT * REPLACE ({wkb_expr} AS {col}) FROM ({query})"
+            "SELECT * REPLACE ({geom_expr} AS {col}) FROM ({query})"
         ))
     }
 }
@@ -124,8 +129,8 @@ mod tests {
             .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
             .unwrap();
 
-        assert!(result.contains("ST_AsBinary"));
-        assert!(!result.contains("ST_Transform"));
+        // Map without CRS is passthrough — WKB added later by framing step
+        assert_eq!(result, "SELECT * FROM t");
     }
 
     #[test]
@@ -140,7 +145,8 @@ mod tests {
             .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
             .unwrap();
 
-        assert!(result.contains("ST_AsBinary"));
+        // Native projected geometry — WKB added later by framing step
+        assert!(!result.contains("ST_AsBinary"));
         assert!(result.contains("ST_Transform"));
         assert!(result.contains("+proj=merc"));
         assert!(!result.contains("ST_Intersection"), "mercator should not clip");

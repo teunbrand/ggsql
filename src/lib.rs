@@ -1074,6 +1074,9 @@ mod integration_tests {
             spatial_rows.iter().all(|r| !r["geometry"].is_null()),
             "all visible features should have valid geometry"
         );
+
+        assert!(!vl_spec["projection"]["scale"].is_null(), "projection.scale should be present");
+        assert!(!vl_spec["projection"]["translate"].is_null(), "projection.translate should be present");
     }
 
     #[cfg(feature = "spatial")]

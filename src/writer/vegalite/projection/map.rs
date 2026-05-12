@@ -14,6 +14,7 @@ use super::ProjectionRenderer;
 pub(in crate::writer) struct MapProjection {
     is_faceted: bool,
     panel_boundary_wkt: Option<String>,
+    frame_bbox: Option<[f64; 4]>,
 }
 
 impl MapProjection {
@@ -24,9 +25,30 @@ impl MapProjection {
                 ParameterValue::String(s) => Some(s.clone()),
                 _ => None,
             });
+        let frame_bbox = project
+            .and_then(|p| p.computed.get("frame_bbox"))
+            .and_then(|v| match v {
+                ParameterValue::Array(arr) if arr.len() == 4 => {
+                    use crate::plot::types::ArrayElement;
+                    let nums: Vec<f64> = arr
+                        .iter()
+                        .filter_map(|e| match e {
+                            ArrayElement::Number(n) => Some(*n),
+                            _ => None,
+                        })
+                        .collect();
+                    if nums.len() == 4 {
+                        Some([nums[0], nums[1], nums[2], nums[3]])
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            });
         Self {
             is_faceted: facet.is_some_and(|f| !f.get_variables().is_empty()),
             panel_boundary_wkt,
+            frame_bbox,
         }
     }
 }
@@ -45,10 +67,25 @@ impl ProjectionRenderer for MapProjection {
     }
 
     fn transform_layers(&self, _spec: &Plot, vl_spec: &mut Value) -> Result<()> {
-        vl_spec["projection"] = json!({
+        let mut proj = json!({
             "type": "identity",
             "reflectY": true
         });
+        if let Some([xmin, ymin, xmax, ymax]) = self.frame_bbox {
+            // 10% expansion to match the default scale expand padding
+            let dx = (xmax - xmin) * 1.1;
+            let dy = (ymax - ymin) * 1.1;
+            let cx = (xmin + xmax) / 2.0;
+            let cy = (ymin + ymax) / 2.0;
+            proj["scale"] = json!({"expr": format!(
+                "min(width / {dx}, height / {dy})"
+            )});
+            proj["translate"] = json!({"expr": format!(
+                "[width / 2 - min(width / {dx}, height / {dy}) * {cx}, \
+                 height / 2 + min(width / {dx}, height / {dy}) * {cy}]"
+            )});
+        }
+        vl_spec["projection"] = proj;
         Ok(())
     }
 
@@ -181,5 +218,33 @@ mod tests {
 
         // view stroke should be nulled out
         assert_eq!(theme["view"]["stroke"], Value::Null);
+    }
+
+    #[test]
+    fn test_frame_bbox_emits_scale_translate_exprs() {
+        use crate::plot::types::ArrayElement;
+
+        let mut proj = Projection::map();
+        proj.computed.insert(
+            "frame_bbox".to_string(),
+            ParameterValue::Array(vec![
+                ArrayElement::Number(0.0),
+                ArrayElement::Number(0.0),
+                ArrayElement::Number(100.0),
+                ArrayElement::Number(200.0),
+            ]),
+        );
+        let renderer = MapProjection::new(Some(&proj), None);
+        let mut vl_spec = json!({"layer": []});
+        let spec = Plot::default();
+
+        renderer.transform_layers(&spec, &mut vl_spec).unwrap();
+
+        let scale = &vl_spec["projection"]["scale"]["expr"];
+        let translate = &vl_spec["projection"]["translate"]["expr"];
+        assert!(scale.is_string(), "scale should be an expr");
+        assert!(translate.is_string(), "translate should be an expr");
+        assert!(scale.as_str().unwrap().contains("width"));
+        assert!(translate.as_str().unwrap().contains("height"));
     }
 }

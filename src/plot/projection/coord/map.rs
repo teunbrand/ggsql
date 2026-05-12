@@ -114,6 +114,70 @@ impl CoordTrait for Map {
             layer_queries[idx] =
                 layer.geom.apply_projection(&layer_queries[idx], projection, dialect)?;
         }
+
+        // Materialize spatial layers as temp tables, compute bbox, wrap with WKB
+        let geom_col = naming::aesthetic_column("geometry");
+        let geom_col_quoted = naming::quote_ident(&geom_col);
+        let mut xmin = f64::INFINITY;
+        let mut ymin = f64::INFINITY;
+        let mut xmax = f64::NEG_INFINITY;
+        let mut ymax = f64::NEG_INFINITY;
+
+        for (idx, layer) in layers.iter().enumerate() {
+            if layer.geom.geom_type() != GeomType::Spatial {
+                continue;
+            }
+            let table_name = format!("{}_proj", naming::layer_key(idx));
+            for stmt in
+                dialect.create_or_replace_temp_table_sql(&table_name, &[], &layer_queries[idx])
+            {
+                execute_query(&stmt)?;
+            }
+
+            let table_quoted = naming::quote_ident(&table_name);
+            let sql = dialect.sql_geometry_extent(&geom_col_quoted, &table_quoted);
+            if let Ok(df) = execute_query(&sql) {
+                let batch = df.inner();
+                if batch.num_rows() > 0 && batch.num_columns() >= 4 {
+                    let get_f64 = |col: usize| -> Option<f64> {
+                        use arrow::array::Array;
+                        batch
+                            .column(col)
+                            .as_any()
+                            .downcast_ref::<arrow::array::Float64Array>()
+                            .filter(|a| !a.is_null(0))
+                            .map(|a| a.value(0))
+                    };
+                    if let (Some(x0), Some(y0), Some(x1), Some(y1)) =
+                        (get_f64(0), get_f64(1), get_f64(2), get_f64(3))
+                    {
+                        xmin = xmin.min(x0);
+                        ymin = ymin.min(y0);
+                        xmax = xmax.max(x1);
+                        ymax = ymax.max(y1);
+                    }
+                }
+            }
+
+            let wkb_expr = dialect.sql_geometry_to_wkb(&geom_col_quoted);
+            layer_queries[idx] = format!(
+                "SELECT * REPLACE ({wkb_expr} AS {geom_col_quoted}) FROM {table_quoted}"
+            );
+        }
+
+        if xmin.is_finite() && xmax.is_finite() {
+            use crate::plot::types::ArrayElement;
+            projection.computed.insert(
+                "frame_bbox".to_string(),
+                ParameterValue::Array(vec![
+                    ArrayElement::Number(xmin),
+                    ArrayElement::Number(ymin),
+                    ArrayElement::Number(xmax),
+                    ArrayElement::Number(ymax),
+                ]),
+            );
+        }
+
         Ok(())
     }
 }
