@@ -35,7 +35,7 @@ plot/
 │   ├── orientation.rs Layer transposition (horizontal vs vertical)
 │   └── position/      identity, stack, dodge, jitter
 ├── projection/        PROJECT clause
-│   └── coord/         cartesian, polar
+│   └── coord/         cartesian, polar, map
 └── scale/             SCALE clause
     ├── scale_type/    binned, continuous, discrete, identity, ordinal
     └── transform/     identity, log, sqrt, asinh, exp, square, pseudo_log,
@@ -64,7 +64,15 @@ Scale type / transform docs: [`/doc/syntax/scale/type/`](../../doc/syntax/scale/
 
 ### `facet/` and `projection/`
 
-Smaller subsystems. Each has a `types.rs` (data structure) and `resolve.rs` (logic that runs during execution). `projection/coord/` currently has `cartesian` and `polar`. Docs: [`/doc/syntax/clause/facet.qmd`](../../doc/syntax/clause/facet.qmd), [`/doc/syntax/coord/`](../../doc/syntax/coord/).
+Each has a `types.rs` (data structure) and `resolve.rs` (logic that runs during execution). `projection/coord/` has three implementations:
+
+- **`cartesian`** — standard x/y. No special behaviour.
+- **`polar`** — radius/angle (for pie/rose plots).
+- **`map`** — geographic projections via PROJ strings. Implements `apply_projection_transforms` to: detect source CRS from geometry SRID, make clip boundaries, delegate per-layer spatial transforms, materialize projected layers as temp tables, and resolve frame bbox from user bounds / data extent / world extent. Properties: `crs` (PROJ string), `source` (source EPSG), `clip` (bool), `bounds` ([xmin, ymin, xmax, ymax] with null/Inf fallback semantics).
+
+`Projection` (in `types.rs`) wraps `Coord` + resolved aesthetics + properties + a `computed` map populated at execution time (e.g., `clip_boundary`, `panel_boundary`, `frame_bbox`).
+
+Docs: [`/doc/syntax/clause/facet.qmd`](../../doc/syntax/clause/facet.qmd), [`/doc/syntax/coord/`](../../doc/syntax/coord/).
 
 ## Adding a new geom / scale type / coord
 
