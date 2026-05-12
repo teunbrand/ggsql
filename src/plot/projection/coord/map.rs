@@ -12,146 +12,9 @@ use crate::DataFrame;
 
 pub const CLIP_BOUNDARY_TABLE: &str = "__ggsql_clip_boundary__";
 
-#[derive(Debug, Clone, PartialEq)]
-struct BBox {
-    xmin: f64,
-    ymin: f64,
-    xmax: f64,
-    ymax: f64,
-    crs: String,
-}
-
-impl BBox {
-    fn from_df(df: &DataFrame, crs: &str) -> Option<Self> {
-        use arrow::array::Array;
-        let batch = df.inner();
-        if batch.num_rows() == 0 || batch.num_columns() < 4 {
-            return None;
-        }
-        let get_f64 = |col: usize| -> Option<f64> {
-            batch
-                .column(col)
-                .as_any()
-                .downcast_ref::<arrow::array::Float64Array>()
-                .filter(|a| !a.is_null(0))
-                .map(|a| a.value(0))
-        };
-        match (get_f64(0), get_f64(1), get_f64(2), get_f64(3)) {
-            (Some(xmin), Some(ymin), Some(xmax), Some(ymax)) => Some(Self {
-                xmin,
-                ymin,
-                xmax,
-                ymax,
-                crs: crs.to_string(),
-            }),
-            _ => None,
-        }
-    }
-
-    fn merge(existing: Option<Self>, new: Option<Self>) -> crate::Result<Option<Self>> {
-        match (existing, new) {
-            (Some(a), Some(b)) => {
-                if a.crs != b.crs {
-                    return Err(crate::GgsqlError::InternalError(format!(
-                        "Cannot merge bounding boxes with different CRS: '{}' vs '{}'",
-                        a.crs, b.crs
-                    )));
-                }
-                Ok(Some(Self {
-                    xmin: a.xmin.min(b.xmin),
-                    ymin: a.ymin.min(b.ymin),
-                    xmax: a.xmax.max(b.xmax),
-                    ymax: a.ymax.max(b.ymax),
-                    crs: a.crs,
-                }))
-            }
-            (Some(b), None) | (None, Some(b)) => Ok(Some(b)),
-            (None, None) => Ok(None),
-        }
-    }
-
-    fn from_array(arr: [f64; 4], crs: &str) -> Self {
-        Self {
-            xmin: arr[0],
-            ymin: arr[1],
-            xmax: arr[2],
-            ymax: arr[3],
-            crs: crs.to_string(),
-        }
-    }
-
-    fn to_array(&self) -> [f64; 4] {
-        [self.xmin, self.ymin, self.xmax, self.ymax]
-    }
-
-    fn clamp(mut self, xmin: f64, ymin: f64, xmax: f64, ymax: f64) -> Self {
-        self.xmin = self.xmin.clamp(xmin, xmax);
-        self.ymin = self.ymin.clamp(ymin, ymax);
-        self.xmax = self.xmax.clamp(xmin, xmax);
-        self.ymax = self.ymax.clamp(ymin, ymax);
-        self
-    }
-
-    fn xrange(&self) -> (f64, f64) {
-        (self.xmin, self.xmax)
-    }
-
-    fn yrange(&self) -> (f64, f64) {
-        (self.ymin, self.ymax)
-    }
-
-    fn as_parameter_value(&self) -> ParameterValue {
-        use crate::plot::types::ArrayElement;
-        ParameterValue::Array(vec![
-            ArrayElement::Number(self.xmin),
-            ArrayElement::Number(self.ymin),
-            ArrayElement::Number(self.xmax),
-            ArrayElement::Number(self.ymax),
-        ])
-    }
-
-    fn reproject(
-        &self,
-        target_crs: &str,
-        dialect: &dyn SqlDialect,
-        execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
-    ) -> Option<Self> {
-        let envelope = format!(
-            "ST_MakeEnvelope({}, {}, {}, {})",
-            self.xmin, self.ymin, self.xmax, self.ymax
-        );
-        let transformed = dialect.sql_st_transform(&envelope, &self.crs, target_crs);
-        let sql = format!(
-            "SELECT ST_XMin(g) AS xmin, ST_YMin(g) AS ymin, \
-                    ST_XMax(g) AS xmax, ST_YMax(g) AS ymax \
-             FROM (SELECT {transformed} AS g)"
-        );
-        execute_query(&sql)
-            .ok()
-            .and_then(|df| Self::from_df(&df, target_crs))
-    }
-}
-
-/// Execute a query and extract a single string value from the first row, first column.
-fn query_scalar_string(
-    sql: &str,
-    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
-) -> Option<String> {
-    use arrow::array::Array;
-    let df = execute_query(sql).ok()?;
-    let batch = df.inner();
-    if batch.num_rows() == 0 {
-        return None;
-    }
-    let arr = batch
-        .column(0)
-        .as_any()
-        .downcast_ref::<arrow::array::StringArray>()?;
-    if arr.is_null(0) {
-        return None;
-    }
-    Some(arr.value(0).to_string())
-}
+// ---------------------------------------------------------------------------
+// Map coord
+// ---------------------------------------------------------------------------
 
 /// Map coordinate system - for geographic/cartographic projections
 #[derive(Debug, Clone, Copy)]
@@ -315,43 +178,133 @@ impl std::fmt::Display for Map {
     }
 }
 
-/// Set up the clip boundary for azimuthal projections. Creates the clip boundary temp table,
-/// projects it into the target CRS, and returns the world bbox (projected clip boundary extent).
-fn setup_clip_boundary(
-    projection: &mut super::super::Projection,
-    source: &str,
-    crs: &str,
-    dialect: &dyn SqlDialect,
-    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
-) -> crate::Result<Option<BBox>> {
-    let Some(wkt) = visible_area_wkt(&projection.properties) else {
-        return Ok(None);
-    };
+// ---------------------------------------------------------------------------
+// BBox
+// ---------------------------------------------------------------------------
 
-    projection.computed.insert(
-        "clip_boundary".to_string(),
-        ParameterValue::String(wkt.clone()),
-    );
-    let body = format!("SELECT ST_GeomFromText('{wkt}') AS geom");
-    for stmt in dialect.create_or_replace_temp_table_sql(CLIP_BOUNDARY_TABLE, &[], &body) {
-        execute_query(&stmt)?;
-    }
-
-    let projected = dialect.sql_st_transform("geom", source, crs);
-    let sql = format!("SELECT ST_AsText({projected}) AS wkt FROM {CLIP_BOUNDARY_TABLE}");
-    if let Some(projected_wkt) = query_scalar_string(&sql, execute_query) {
-        projection.computed.insert(
-            "panel_boundary".to_string(),
-            ParameterValue::String(projected_wkt),
-        );
-    }
-
-    let world_bbox_sql = dialect.sql_geometry_bbox(&projected, CLIP_BOUNDARY_TABLE);
-    let world_bbox = execute_query(&world_bbox_sql)
-        .ok()
-        .and_then(|df| BBox::from_df(&df, crs));
-    Ok(world_bbox)
+#[derive(Debug, Clone, PartialEq)]
+struct BBox {
+    xmin: f64,
+    ymin: f64,
+    xmax: f64,
+    ymax: f64,
+    crs: String,
 }
+
+impl BBox {
+    fn from_df(df: &DataFrame, crs: &str) -> Option<Self> {
+        use arrow::array::Array;
+        let batch = df.inner();
+        if batch.num_rows() == 0 || batch.num_columns() < 4 {
+            return None;
+        }
+        let get_f64 = |col: usize| -> Option<f64> {
+            batch
+                .column(col)
+                .as_any()
+                .downcast_ref::<arrow::array::Float64Array>()
+                .filter(|a| !a.is_null(0))
+                .map(|a| a.value(0))
+        };
+        match (get_f64(0), get_f64(1), get_f64(2), get_f64(3)) {
+            (Some(xmin), Some(ymin), Some(xmax), Some(ymax)) => Some(Self {
+                xmin,
+                ymin,
+                xmax,
+                ymax,
+                crs: crs.to_string(),
+            }),
+            _ => None,
+        }
+    }
+
+    fn merge(existing: Option<Self>, new: Option<Self>) -> crate::Result<Option<Self>> {
+        match (existing, new) {
+            (Some(a), Some(b)) => {
+                if a.crs != b.crs {
+                    return Err(crate::GgsqlError::InternalError(format!(
+                        "Cannot merge bounding boxes with different CRS: '{}' vs '{}'",
+                        a.crs, b.crs
+                    )));
+                }
+                Ok(Some(Self {
+                    xmin: a.xmin.min(b.xmin),
+                    ymin: a.ymin.min(b.ymin),
+                    xmax: a.xmax.max(b.xmax),
+                    ymax: a.ymax.max(b.ymax),
+                    crs: a.crs,
+                }))
+            }
+            (Some(b), None) | (None, Some(b)) => Ok(Some(b)),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn from_array(arr: [f64; 4], crs: &str) -> Self {
+        Self {
+            xmin: arr[0],
+            ymin: arr[1],
+            xmax: arr[2],
+            ymax: arr[3],
+            crs: crs.to_string(),
+        }
+    }
+
+    fn to_array(&self) -> [f64; 4] {
+        [self.xmin, self.ymin, self.xmax, self.ymax]
+    }
+
+    fn clamp(mut self, xmin: f64, ymin: f64, xmax: f64, ymax: f64) -> Self {
+        self.xmin = self.xmin.clamp(xmin, xmax);
+        self.ymin = self.ymin.clamp(ymin, ymax);
+        self.xmax = self.xmax.clamp(xmin, xmax);
+        self.ymax = self.ymax.clamp(ymin, ymax);
+        self
+    }
+
+    fn xrange(&self) -> (f64, f64) {
+        (self.xmin, self.xmax)
+    }
+
+    fn yrange(&self) -> (f64, f64) {
+        (self.ymin, self.ymax)
+    }
+
+    fn as_parameter_value(&self) -> ParameterValue {
+        use crate::plot::types::ArrayElement;
+        ParameterValue::Array(vec![
+            ArrayElement::Number(self.xmin),
+            ArrayElement::Number(self.ymin),
+            ArrayElement::Number(self.xmax),
+            ArrayElement::Number(self.ymax),
+        ])
+    }
+
+    fn reproject(
+        &self,
+        target_crs: &str,
+        dialect: &dyn SqlDialect,
+        execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+    ) -> Option<Self> {
+        let envelope = format!(
+            "ST_MakeEnvelope({}, {}, {}, {})",
+            self.xmin, self.ymin, self.xmax, self.ymax
+        );
+        let transformed = dialect.sql_st_transform(&envelope, &self.crs, target_crs);
+        let sql = format!(
+            "SELECT ST_XMin(g) AS xmin, ST_YMin(g) AS ymin, \
+                    ST_XMax(g) AS xmax, ST_YMax(g) AS ymax \
+             FROM (SELECT {transformed} AS g)"
+        );
+        execute_query(&sql)
+            .ok()
+            .and_then(|df| Self::from_df(&df, target_crs))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Graticule helpers
+// ---------------------------------------------------------------------------
 
 /// Build graticule lines: determine the visible lon/lat extent, generate densified
 /// meridians and parallels, clip and project them, and return projected WKT.
@@ -471,27 +424,6 @@ fn graticule_bbox(
     Ok(Some(geo_bbox))
 }
 
-/// Clip (if needed) and project a WKT geometry string, returning the projected WKT.
-fn project_wkt(
-    wkt: Option<String>,
-    has_clip: bool,
-    source: &str,
-    crs: &str,
-    dialect: &dyn SqlDialect,
-    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
-) -> crate::Result<Option<String>> {
-    let Some(wkt) = wkt else { return Ok(None) };
-    let geom_expr = format!("ST_GeomFromText('{wkt}')");
-    let clipped = if has_clip {
-        format!("ST_Intersection({geom_expr}, (SELECT geom FROM {CLIP_BOUNDARY_TABLE}))")
-    } else {
-        geom_expr
-    };
-    let projected = dialect.sql_st_transform(&clipped, source, crs);
-    let sql = format!("SELECT ST_AsText({projected}) AS wkt");
-    Ok(query_scalar_string(&sql, execute_query))
-}
-
 /// Pick pretty graticule break positions for a lon or lat range.
 /// Uses standard angular intervals (multiples of 1, 2, 5, 10, 15, 30, 45, 90).
 fn graticule_breaks((min, max): (f64, f64)) -> Vec<f64> {
@@ -562,6 +494,90 @@ fn grid_lines_wkt(
     format!("MULTILINESTRING({})", lines.join(", "))
 }
 
+// ---------------------------------------------------------------------------
+// Generic helpers
+// ---------------------------------------------------------------------------
+
+/// Execute a query and extract a single string value from the first row, first column.
+fn query_scalar_string(
+    sql: &str,
+    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+) -> Option<String> {
+    use arrow::array::Array;
+    let df = execute_query(sql).ok()?;
+    let batch = df.inner();
+    if batch.num_rows() == 0 {
+        return None;
+    }
+    let arr = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::StringArray>()?;
+    if arr.is_null(0) {
+        return None;
+    }
+    Some(arr.value(0).to_string())
+}
+
+/// Set up the clip boundary for azimuthal projections. Creates the clip boundary temp table,
+/// projects it into the target CRS, and returns the world bbox (projected clip boundary extent).
+fn setup_clip_boundary(
+    projection: &mut super::super::Projection,
+    source: &str,
+    crs: &str,
+    dialect: &dyn SqlDialect,
+    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+) -> crate::Result<Option<BBox>> {
+    let Some(wkt) = visible_area_wkt(&projection.properties) else {
+        return Ok(None);
+    };
+
+    projection.computed.insert(
+        "clip_boundary".to_string(),
+        ParameterValue::String(wkt.clone()),
+    );
+    let body = format!("SELECT ST_GeomFromText('{wkt}') AS geom");
+    for stmt in dialect.create_or_replace_temp_table_sql(CLIP_BOUNDARY_TABLE, &[], &body) {
+        execute_query(&stmt)?;
+    }
+
+    let projected = dialect.sql_st_transform("geom", source, crs);
+    let sql = format!("SELECT ST_AsText({projected}) AS wkt FROM {CLIP_BOUNDARY_TABLE}");
+    if let Some(projected_wkt) = query_scalar_string(&sql, execute_query) {
+        projection.computed.insert(
+            "panel_boundary".to_string(),
+            ParameterValue::String(projected_wkt),
+        );
+    }
+
+    let world_bbox_sql = dialect.sql_geometry_bbox(&projected, CLIP_BOUNDARY_TABLE);
+    let world_bbox = execute_query(&world_bbox_sql)
+        .ok()
+        .and_then(|df| BBox::from_df(&df, crs));
+    Ok(world_bbox)
+}
+
+/// Clip (if needed) and project a WKT geometry string, returning the projected WKT.
+fn project_wkt(
+    wkt: Option<String>,
+    has_clip: bool,
+    source: &str,
+    crs: &str,
+    dialect: &dyn SqlDialect,
+    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+) -> crate::Result<Option<String>> {
+    let Some(wkt) = wkt else { return Ok(None) };
+    let geom_expr = format!("ST_GeomFromText('{wkt}')");
+    let clipped = if has_clip {
+        format!("ST_Intersection({geom_expr}, (SELECT geom FROM {CLIP_BOUNDARY_TABLE}))")
+    } else {
+        geom_expr
+    };
+    let projected = dialect.sql_st_transform(&clipped, source, crs);
+    let sql = format!("SELECT ST_AsText({projected}) AS wkt");
+    Ok(query_scalar_string(&sql, execute_query))
+}
+
 /// Returns true if we need to compute a bbox (bounding box representing the extent of geometry)
 /// from the data — i.e. when bounds is absent or has null elements that need filling in.
 fn needs_computed_bbox(bounds_param: Option<&ParameterValue>) -> bool {
@@ -609,6 +625,45 @@ fn resolve_frame_bbox(
     }
     computed
 }
+
+fn detect_source_srid(
+    layers: &[Layer],
+    layer_queries: &[String],
+    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
+) -> Option<String> {
+    let geom_col = naming::quote_ident(&naming::aesthetic_column("geometry"));
+
+    for (idx, layer) in layers.iter().enumerate() {
+        if layer.geom.geom_type() != GeomType::Spatial {
+            continue;
+        }
+        let sql = format!(
+            "SELECT ST_SRID({geom_col}) AS srid FROM ({}) WHERE {geom_col} IS NOT NULL LIMIT 1",
+            layer_queries[idx]
+        );
+        if let Ok(df) = execute_query(&sql) {
+            let batch = df.inner();
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            if let Some(arr) = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::Int32Array>()
+            {
+                let srid = arr.value(0);
+                if srid != 0 {
+                    return Some(format!("EPSG:{srid}"));
+                }
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Visible area / horizon clipping
+// ---------------------------------------------------------------------------
 
 /// Returns a WKT POLYGON representing the visible hemisphere for the given projection
 /// properties, or `None` if the projection doesn't require horizon clipping.
@@ -857,40 +912,9 @@ fn antimeridian_crossing_lat(a: (f64, f64), b: (f64, f64)) -> f64 {
     lat_a + t * (lat_b - lat_a)
 }
 
-fn detect_source_srid(
-    layers: &[Layer],
-    layer_queries: &[String],
-    execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
-) -> Option<String> {
-    let geom_col = naming::quote_ident(&naming::aesthetic_column("geometry"));
-
-    for (idx, layer) in layers.iter().enumerate() {
-        if layer.geom.geom_type() != GeomType::Spatial {
-            continue;
-        }
-        let sql = format!(
-            "SELECT ST_SRID({geom_col}) AS srid FROM ({}) WHERE {geom_col} IS NOT NULL LIMIT 1",
-            layer_queries[idx]
-        );
-        if let Ok(df) = execute_query(&sql) {
-            let batch = df.inner();
-            if batch.num_rows() == 0 {
-                continue;
-            }
-            if let Some(arr) = batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<arrow::array::Int32Array>()
-            {
-                let srid = arr.value(0);
-                if srid != 0 {
-                    return Some(format!("EPSG:{srid}"));
-                }
-            }
-        }
-    }
-    None
-}
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
