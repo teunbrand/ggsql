@@ -86,6 +86,15 @@ fn parse_boolean_node(node: &Node, source: &SourceTree) -> bool {
     text == "true"
 }
 
+fn parse_infinity_node(node: &Node, source: &SourceTree) -> f64 {
+    let text = source.get_text(node);
+    if text.starts_with('-') {
+        f64::NEG_INFINITY
+    } else {
+        f64::INFINITY
+    }
+}
+
 /// Parse an array node into Vec<ArrayElement>
 fn parse_array_node(node: &Node, source: &SourceTree) -> Result<Vec<ArrayElement>> {
     let mut values = Vec::new();
@@ -105,6 +114,7 @@ fn parse_array_node(node: &Node, source: &SourceTree) -> Result<Vec<ArrayElement
             "number" => ArrayElement::Number(parse_number_node(&elem_child, source)?),
             "boolean" => ArrayElement::Boolean(parse_boolean_node(&elem_child, source)),
             "null_literal" => ArrayElement::Null,
+            "infinity" => ArrayElement::Number(parse_infinity_node(&elem_child, source)),
             _ => {
                 return Err(GgsqlError::ParseError(format!(
                     "Invalid array element type: {}",
@@ -138,6 +148,7 @@ fn parse_value_node(node: &Node, source: &SourceTree, context: &str) -> Result<P
             Ok(ParameterValue::Array(values))
         }
         "null_literal" => Ok(ParameterValue::Null),
+        "infinity" => Ok(ParameterValue::Number(parse_infinity_node(node, source))),
         _ => Err(GgsqlError::ParseError(format!(
             "Unexpected {} value type: {}",
             context,

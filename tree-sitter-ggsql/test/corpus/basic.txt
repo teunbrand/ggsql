@@ -3224,3 +3224,40 @@ SELECT x, COUNT(DISTINCT y) OVER (PARTITION BY x) AS n FROM data VISUALISE n AS 
     (viz_clause
       (draw_clause
         (geom_type)))))
+
+================================================================================
+Infinity literals in SETTING
+================================================================================
+
+VISUALISE
+DRAW point SETTING bounds => [null, 1, Inf, -Inf], limit => inf
+
+--------------------------------------------------------------------------------
+
+(query
+  (visualise_statement
+    (visualise_keyword)
+    (viz_clause
+      (draw_clause
+        (geom_type)
+        (setting_clause
+          (parameter_assignment
+            name: (parameter_name
+              (identifier
+                (bare_identifier)))
+            value: (parameter_value
+              (array
+                (array_element
+                  (null_literal))
+                (array_element
+                  (number))
+                (array_element
+                  (infinity))
+                (array_element
+                  (infinity)))))
+          (parameter_assignment
+            name: (parameter_name
+              (identifier
+                (bare_identifier)))
+            value: (parameter_value
+              (infinity))))))))
