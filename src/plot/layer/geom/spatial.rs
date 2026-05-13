@@ -75,7 +75,11 @@ impl GeomTrait for Spatial {
 
             if projection.computed.contains_key("clip_boundary") {
                 return Ok(apply_clip_boundary(
-                    query, &col, source, crs, CLIP_BOUNDARY_TABLE,
+                    query,
+                    &col,
+                    source,
+                    crs,
+                    CLIP_BOUNDARY_TABLE,
                 ));
             }
 
@@ -149,7 +153,10 @@ mod tests {
         assert!(!result.contains("ST_AsBinary"));
         assert!(result.contains("ST_Transform"));
         assert!(result.contains("+proj=merc"));
-        assert!(!result.contains("ST_Intersection"), "mercator should not clip");
+        assert!(
+            !result.contains("ST_Intersection"),
+            "mercator should not clip"
+        );
     }
 
     #[test]

@@ -18,6 +18,7 @@ const POLAR_OUTER: f64 = 1.0;
 /// `1 - paddingInner` for band scales, which is ~0.9).
 const POLAR_BAND_FRACTION: f64 = 0.9;
 
+
 /// Resolved geometry and scale context for polar specs.
 ///
 /// Holds angular range, radius bounds, VL expression strings for the panel
@@ -225,7 +226,7 @@ impl ProjectionRenderer for PolarProjection {
 impl PolarProjection {
     fn grid_rings(&self, theme: &Value) -> Vec<Value> {
         let p = &self.panel;
-        if p.radial.is_free {
+        if p.radial.suppress {
             return Vec::new();
         }
         let Some((domain_min, domain_max)) = p.radial.domain else {
@@ -286,7 +287,7 @@ impl PolarProjection {
 
     fn grid_spokes(&self, theme: &Value) -> Vec<Value> {
         let p = &self.panel;
-        if p.angle.is_free || p.angle.domain.is_none() {
+        if p.angle.suppress || p.angle.domain.is_none() {
             return Vec::new();
         }
         if p.angle.breaks.is_empty() {
@@ -331,7 +332,7 @@ impl PolarProjection {
 
     fn radial_axis(&self, theme: &Value) -> Vec<Value> {
         let p = &self.panel;
-        if p.radial.is_free {
+        if p.radial.suppress {
             return Vec::new();
         }
         if p.radial.domain.is_none() {
@@ -483,7 +484,7 @@ impl PolarProjection {
 
     fn angular_axis(&self, theme: &Value) -> Vec<Value> {
         let p = &self.panel;
-        if p.angle.is_free {
+        if p.angle.suppress {
             return Vec::new();
         }
         let Some((domain_min, domain_max)) = p.angle.domain else {
@@ -544,7 +545,7 @@ impl PolarProjection {
             .collect();
         let theta = p.expr_normalize_theta("datum.v");
 
-        let tick_just: f64 = if p.is_full_circle { 0.5 } else { 0.0 };
+        let tick_just: f64 = 0.0;
 
         let outer_cx = p.expr_x(&outer_s, &theta);
         let outer_cy = p.expr_y(&outer_s, &theta);
@@ -1813,6 +1814,29 @@ mod tests {
         assert!(!proj.grid_rings(&theme).is_empty());
         assert!(!proj.grid_spokes(&theme).is_empty());
         assert!(!proj.radial_axis(&theme).is_empty());
+        assert!(!proj.angular_axis(&theme).is_empty());
+    }
+
+    #[test]
+    fn dummy_scale_suppresses_decoration() {
+        use crate::naming::stat_column;
+        use crate::plot::types::ArrayElement;
+
+        let dummy_sentinel = stat_column("dummy");
+        let mut dummy = Scale::new("pos1");
+        dummy.input_range = Some(vec![ArrayElement::String(dummy_sentinel)]);
+
+        let angle = scale_with_breaks("pos2", (0.0, 360.0), vec![90.0, 180.0, 270.0]);
+        let scales = vec![dummy, angle];
+
+        let proj = PolarProjection {
+            panel: PolarContext::new(None, None, &scales),
+        };
+        let theme = Value::Null;
+
+        assert!(proj.grid_rings(&theme).is_empty());
+        assert!(proj.radial_axis(&theme).is_empty());
+        assert!(!proj.grid_spokes(&theme).is_empty());
         assert!(!proj.angular_axis(&theme).is_empty());
     }
 

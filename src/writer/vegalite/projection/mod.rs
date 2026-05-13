@@ -149,23 +149,25 @@ pub(in crate::writer) struct AxisInfo {
     pub domain: Option<(f64, f64)>,
     pub breaks: Vec<f64>,
     pub labels: Vec<(f64, String)>,
-    pub is_free: bool,
+    pub suppress: bool,
 }
 
 impl AxisInfo {
     pub fn new(aesthetic: &str, scales: &[Scale], facet: Option<&crate::plot::Facet>) -> Self {
-        let (domain, labels) = match scales.iter().find(|s| s.aesthetic == aesthetic) {
+        let scale = scales.iter().find(|s| s.aesthetic == aesthetic);
+        let (domain, labels) = match scale {
             Some(s) => (s.numeric_domain(), s.break_labels()),
             None => (None, Vec::new()),
         };
         let domain = domain.filter(|(min, max)| (max - min).abs() > f64::EPSILON);
         let breaks = labels.iter().map(|(v, _)| *v).collect();
-        let is_free = facet.is_some_and(|f| f.is_free(aesthetic));
+        let suppress =
+            facet.is_some_and(|f| f.is_free(aesthetic)) || scale.is_some_and(|s| s.is_dummy());
         Self {
             domain,
             breaks,
             labels,
-            is_free,
+            suppress,
         }
     }
 }
