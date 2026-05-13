@@ -1131,6 +1131,7 @@ fn parse_coord_system(
         "lambert" => map_proj("laea"),
         "azimuthal_equidistant" => map_proj("aeqd"),
         "igh" => map_proj("igh"),
+        "robinson" => map_proj("robin"),
         _ => Err(GgsqlError::ParseError(format!(
             "Unknown coord type: {}",
             text

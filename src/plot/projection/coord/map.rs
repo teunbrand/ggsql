@@ -158,10 +158,7 @@ impl CoordTrait for Map {
         // Step 6: Generate graticule lines (azimuthal and interrupted projections
         // need clip-based extent and ST_Intersection; cylindrical projections don't)
         let proj_name = extract_proj_param_str(&crs, "+proj=");
-        let needs_clip = matches!(
-            proj_name,
-            Some("ortho") | Some("gnom") | Some("stere") | Some("igh")
-        );
+        let needs_clip = needs_graticule_clip(proj_name);
         let (lon_wkt, lat_wkt) =
             build_graticule(&bbox, &source, needs_clip, dialect, execute_query)?;
         if let Some(wkt) = lon_wkt {
@@ -393,8 +390,8 @@ fn build_graticule(
     };
 
     Ok((
-        project_wkt(lon_wkt, has_clip, source, crs, dialect, execute_query)?,
-        project_wkt(lat_wkt, has_clip, source, crs, dialect, execute_query)?,
+        project_graticule_wkt(lon_wkt, has_clip, source, crs, dialect, execute_query)?,
+        project_graticule_wkt(lat_wkt, has_clip, source, crs, dialect, execute_query)?,
     ))
 }
 
@@ -574,7 +571,7 @@ fn setup_clip_boundary(
 }
 
 /// Clip (if needed) and project a WKT geometry string, returning the projected WKT.
-fn project_wkt(
+fn project_graticule_wkt(
     wkt: Option<String>,
     has_clip: bool,
     source: &str,
@@ -707,6 +704,10 @@ pub fn visible_area_wkt(properties: &HashMap<String, ParameterValue>) -> Option<
         }
         Some("laea") | Some("aeqd") => todo!("full-globe azimuthal visible area"),
         Some("igh") => Some(igh_outline_wkt()),
+        Some("robin") => Some(densified_rectangle_wkt(
+            -180.0, -90.0, 180.0, 90.0,
+            [1, 36, 1, 36], // densify left/right meridian edges only
+        )),
         Some("merc") => Some(BBox::from_array([-180.0, -85.0, 180.0, 85.0], "").to_polygon_wkt()),
         Some("mill") | Some("eqc") => {
             Some(BBox::from_array([-180.0, -90.0, 180.0, 90.0], "").to_polygon_wkt())
@@ -723,6 +724,38 @@ fn projection_center(crs: &str) -> (f64, f64) {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0.0);
     (lon, lat)
+}
+
+/// Rectangle WKT with selectively densified edges.
+/// `segments` controls how many segments each edge is split into:
+/// `[top, right, bottom, left]`. Use 1 for no densification on an edge.
+fn densified_rectangle_wkt(
+    xmin: f64,
+    ymin: f64,
+    xmax: f64,
+    ymax: f64,
+    segments: [usize; 4],
+) -> String {
+    let mut coords: Vec<String> = Vec::new();
+    let [top, right, bottom, left] = segments.map(|s| s.max(1));
+    for i in 0..top {
+        let t = i as f64 / top as f64;
+        coords.push(format!("{:.6} {:.6}", xmin + t * (xmax - xmin), ymax));
+    }
+    for i in 0..right {
+        let t = i as f64 / right as f64;
+        coords.push(format!("{:.6} {:.6}", xmax, ymax - t * (ymax - ymin)));
+    }
+    for i in 0..bottom {
+        let t = i as f64 / bottom as f64;
+        coords.push(format!("{:.6} {:.6}", xmax - t * (xmax - xmin), ymin));
+    }
+    for i in 0..left {
+        let t = i as f64 / left as f64;
+        coords.push(format!("{:.6} {:.6}", xmin, ymin + t * (ymax - ymin)));
+    }
+    coords.push(format!("{:.6} {:.6}", xmin, ymax));
+    format!("POLYGON(({}))", coords.join(", "))
 }
 
 /// Interrupted Goode Homolosine outline polygon with densified meridian edges.
@@ -772,6 +805,14 @@ fn igh_outline_wkt() -> String {
     coords.push("180 90".to_string());
 
     format!("POLYGON(({}))", coords.join(", "))
+}
+
+/// Whether graticule generation should use the clip boundary extent rather than
+/// inverse-projecting the frame bbox corners. Needed for projections with curved
+/// edges or interruptions, where corner inverse-projection doesn't recover the
+/// full visible lon/lat range.
+fn needs_graticule_clip(proj_name: Option<&str>) -> bool {
+    !matches!(proj_name, Some("merc") | Some("mill") | Some("eqc") | None)
 }
 
 fn extract_proj_param_str<'a>(crs: &'a str, key: &str) -> Option<&'a str> {
