@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_projection_map_with_crs() {
+    fn test_apply_projection_map_with_crs_no_clip() {
         let spatial = Spatial;
         let mut projection = Projection::map();
         projection.properties.insert(
@@ -149,14 +149,34 @@ mod tests {
             .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
             .unwrap();
 
-        // Native projected geometry — WKB added later by framing step
+        // Without clip_boundary in computed, just ST_Transform
         assert!(!result.contains("ST_AsBinary"));
         assert!(result.contains("ST_Transform"));
         assert!(result.contains("+proj=merc"));
-        assert!(
-            !result.contains("ST_Intersection"),
-            "mercator should not clip"
+        assert!(!result.contains("ST_Intersection"));
+    }
+
+    #[test]
+    fn test_apply_projection_mercator_with_clip_boundary() {
+        let spatial = Spatial;
+        let mut projection = Projection::map();
+        projection.properties.insert(
+            "crs".to_string(),
+            ParameterValue::String("+proj=merc".to_string()),
         );
+        projection.computed.insert(
+            "clip_boundary".to_string(),
+            ParameterValue::String(
+                "POLYGON((-180 -85, 180 -85, 180 85, -180 85, -180 -85))".to_string(),
+            ),
+        );
+        let result = spatial
+            .apply_projection("SELECT * FROM t", &projection, &AnsiDialect)
+            .unwrap();
+
+        assert!(result.contains("ST_Intersection"));
+        assert!(result.contains("ST_Intersects"));
+        assert!(result.contains("__ggsql_clip_boundary__"));
     }
 
     #[test]

@@ -125,18 +125,19 @@ impl ProjectionRenderer for MapProjection {
             "reflectY": true
         });
         if let Some([xmin, ymin, xmax, ymax]) = self.frame_bbox {
-            // 10% expansion to match the default scale expand padding
             let dx = (xmax - xmin) * 1.1;
             let dy = (ymax - ymin) * 1.1;
-            let cx = (xmin + xmax) / 2.0;
-            let cy = (ymin + ymax) / 2.0;
-            proj["scale"] = json!({"expr": format!(
-                "min(width / {dx}, height / {dy})"
-            )});
-            proj["translate"] = json!({"expr": format!(
-                "[width / 2 - min(width / {dx}, height / {dy}) * {cx}, \
-                 height / 2 + min(width / {dx}, height / {dy}) * {cy}]"
-            )});
+            if dx.is_finite() && dy.is_finite() && dx > 0.0 && dy > 0.0 {
+                let cx = (xmin + xmax) / 2.0;
+                let cy = (ymin + ymax) / 2.0;
+                proj["scale"] = json!({"expr": format!(
+                    "min(width / {dx}, height / {dy})"
+                )});
+                proj["translate"] = json!({"expr": format!(
+                    "[width / 2 - min(width / {dx}, height / {dy}) * {cx}, \
+                     height / 2 + min(width / {dx}, height / {dy}) * {cy}]"
+                )});
+            }
         }
         vl_spec["projection"] = proj;
         Ok(())

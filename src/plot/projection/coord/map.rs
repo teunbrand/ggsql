@@ -100,10 +100,11 @@ impl CoordTrait for Map {
             _ => return Ok(()),
         };
 
-        // Step 2: For azimuthal projections, compute the hemisphere clip boundary.
-        // This produces: clip_boundary (unprojected WKT), panel_boundary (projected
-        // WKT for the writer's background layer), and world_bbox (bounding box of the
-        // full projected visible area, used to resolve Inf in user-specified bounds).
+        // Step 2: Compute the visible area boundary for this projection.
+        // Azimuthal projections get a hemisphere polygon; cylindrical get a world
+        // rectangle. This produces: clip_boundary (unprojected WKT), panel_boundary
+        // (projected WKT for the writer's background layer), and world_bbox (bounding
+        // box of the full projected visible area, used to resolve Inf in user bounds).
         let world_bbox = setup_clip_boundary(projection, &source, &crs, dialect, execute_query)?;
 
         // Step 3: Apply per-layer projection (ST_Transform, clip to horizon)
@@ -242,10 +243,10 @@ impl BBox {
 
     fn from_array(arr: [f64; 4], crs: &str) -> Self {
         Self {
-            xmin: arr[0],
-            ymin: arr[1],
-            xmax: arr[2],
-            ymax: arr[3],
+            xmin: arr[0].min(arr[2]),
+            ymin: arr[1].min(arr[3]),
+            xmax: arr[0].max(arr[2]),
+            ymax: arr[1].max(arr[3]),
             crs: crs.to_string(),
         }
     }
@@ -268,6 +269,13 @@ impl BBox {
 
     fn yrange(&self) -> (f64, f64) {
         (self.ymin, self.ymax)
+    }
+
+    fn to_polygon_wkt(&self) -> String {
+        let (xmin, ymin, xmax, ymax) = (self.xmin, self.ymin, self.xmax, self.ymax);
+        format!(
+            "POLYGON(({xmin} {ymin}, {xmax} {ymin}, {xmax} {ymax}, {xmin} {ymax}, {xmin} {ymin}))"
+        )
     }
 
     fn as_parameter_value(&self) -> ParameterValue {
@@ -665,44 +673,43 @@ fn detect_source_srid(
 // Visible area / horizon clipping
 // ---------------------------------------------------------------------------
 
-/// Returns a WKT POLYGON representing the visible hemisphere for the given projection
-/// properties, or `None` if the projection doesn't require horizon clipping.
+/// Returns a WKT POLYGON representing the valid visible area for the given projection.
 ///
-/// The polygon is a 72-vertex haversine boundary at 88° great-circle radius from the
-/// projection center (`lon_0`, `lat_0`). Azimuthal projections (orthographic, gnomonic)
-/// only display one hemisphere; geometry beyond this boundary produces degenerate output
-/// after `ST_Transform` and must be clipped.
+/// - Azimuthal projections (orthographic, gnomonic): a 72-vertex haversine boundary at
+///   88° great-circle radius from the projection center. Geometry beyond this boundary
+///   produces degenerate output after `ST_Transform`.
+/// - Cylindrical projections (mercator): a rectangle at ±180° longitude, ±85° latitude
+///   (the Mercator singularity is at ±85.05°).
+/// - Returns `None` if no CRS is set (no projection to apply).
 pub fn visible_area_wkt(properties: &HashMap<String, ParameterValue>) -> Option<String> {
     let crs = match properties.get("crs") {
         Some(ParameterValue::String(s)) => s,
         _ => return None,
     };
 
-    if !needs_horizon_clip(crs) {
-        return None;
-    }
-
     let center = projection_center(crs);
-    Some(hemisphere_polygon_wkt(center.0, center.1, 88.0))
-}
-
-fn needs_horizon_clip(crs: &str) -> bool {
-    let lower = crs.to_ascii_lowercase();
-    lower.contains("+proj=ortho") || lower.contains("+proj=gnom")
+    match extract_proj_param_str(crs, "+proj=") {
+        Some("ortho") | Some("gnom") => Some(hemisphere_polygon_wkt(center.0, center.1, 88.0)),
+        Some("merc") => Some(BBox::from_array([-180.0, -85.0, 180.0, 85.0], "").to_polygon_wkt()),
+        _ => None,
+    }
 }
 
 fn projection_center(crs: &str) -> (f64, f64) {
-    let lon = extract_proj_param(crs, "+lon_0=").unwrap_or(0.0);
-    let lat = extract_proj_param(crs, "+lat_0=").unwrap_or(0.0);
+    let lon = extract_proj_param_str(crs, "+lon_0=")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    let lat = extract_proj_param_str(crs, "+lat_0=")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
     (lon, lat)
 }
 
-fn extract_proj_param(crs: &str, key: &str) -> Option<f64> {
-    crs.find(key).and_then(|start| {
-        let after = &crs[start + key.len()..];
-        let end = after.find([' ', '+']).unwrap_or(after.len());
-        after[..end].parse().ok()
-    })
+fn extract_proj_param_str<'a>(crs: &'a str, key: &str) -> Option<&'a str> {
+    let start = crs.find(key)?;
+    let after = &crs[start + key.len()..];
+    let end = after.find([' ', '+']).unwrap_or(after.len());
+    Some(&after[..end])
 }
 
 /// Haversine boundary polygon at `radius_deg` from `(lon0, lat0)`, as WKT.
@@ -1000,13 +1007,18 @@ mod tests {
     }
 
     #[test]
-    fn test_visible_area_wkt_mercator_returns_none() {
+    fn test_visible_area_wkt_mercator_returns_rectangle() {
         let mut props = HashMap::new();
         props.insert(
             "crs".to_string(),
             ParameterValue::String("+proj=merc".to_string()),
         );
-        assert!(visible_area_wkt(&props).is_none());
+        let wkt = visible_area_wkt(&props);
+        assert!(wkt.is_some());
+        let wkt = wkt.unwrap();
+        assert!(wkt.starts_with("POLYGON(("));
+        assert!(wkt.contains("-180") && wkt.contains("180"));
+        assert!(wkt.contains("-85") && wkt.contains("85"));
     }
 
     #[test]
