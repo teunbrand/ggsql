@@ -57,12 +57,6 @@ impl MapProjection {
     }
 
     fn panel_boundary(&self, theme: &mut Value) -> Vec<Value> {
-        let Some(ref wkt) = self.panel_boundary_wkt else {
-            return Vec::new();
-        };
-        let Some(geojson) = wkt_to_geojson(wkt) else {
-            return Vec::new();
-        };
         let (fill, stroke) =
             if let Some(view) = theme.get_mut("view").and_then(|v| v.as_object_mut()) {
                 let fill = view.remove("fill").unwrap_or(Value::Null);
@@ -72,13 +66,30 @@ impl MapProjection {
             } else {
                 (Value::Null, Value::Null)
             };
-        vec![geoshape_layer(
-            geojson,
-            json!({
-                "fill": fill,
-                "stroke": stroke,
-            }),
-        )]
+
+        if let Some(ref wkt) = self.panel_boundary_wkt {
+            let Some(geojson) = wkt_to_geojson(wkt) else {
+                return Vec::new();
+            };
+            vec![geoshape_layer(
+                geojson,
+                json!({ "fill": fill, "stroke": stroke }),
+            )]
+        } else {
+            vec![json!({
+                "mark": {
+                    "type": "rect",
+                    "fill": fill,
+                    "stroke": stroke,
+                },
+                "encoding": {
+                    "x": {"value": 0},
+                    "y": {"value": 0},
+                    "x2": {"value": {"expr": "width"}},
+                    "y2": {"value": {"expr": "height"}},
+                }
+            })]
+        }
     }
 
     fn graticule(&self, theme: &Value) -> Vec<Value> {
@@ -230,7 +241,11 @@ mod tests {
         let renderer = MapProjection::new(None, None);
         let mut theme = json!({"view": {"fill": "white", "stroke": "gray"}});
         let layers = renderer.background_layers(&[], &mut theme);
-        assert!(layers.is_empty());
+        // Fallback: rect mark spanning the full view
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0]["mark"]["type"], "rect");
+        assert_eq!(layers[0]["mark"]["fill"], "white");
+        assert_eq!(layers[0]["mark"]["stroke"], "gray");
     }
 
     #[test]
@@ -303,8 +318,10 @@ mod tests {
         let mut theme = json!({"axis": {"gridColor": "#dddddd", "gridWidth": 1}});
         let layers = renderer.background_layers(&[], &mut theme);
 
-        assert_eq!(layers.len(), 2);
-        for layer in &layers {
+        // 1 rect fallback + 2 graticule layers
+        assert_eq!(layers.len(), 3);
+        assert_eq!(layers[0]["mark"]["type"], "rect");
+        for layer in &layers[1..] {
             assert_eq!(layer["mark"]["type"], "geoshape");
             assert_eq!(layer["mark"]["filled"], false);
             assert_eq!(layer["mark"]["stroke"], "#dddddd");
