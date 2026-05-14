@@ -1128,6 +1128,8 @@ fn parse_coord_system(
         "miller" => map_proj("mill"),
         "equirectangular" => map_proj("eqc"),
         "stereographic" => map_proj("stere"),
+        "gnomonic" => map_proj("gnom"),
+        "equal_area" => map_proj("cea"),
         "lambert" => map_proj("laea"),
         "azimuthal_equidistant" => map_proj("aeqd"),
         "igh" => map_proj("igh"),

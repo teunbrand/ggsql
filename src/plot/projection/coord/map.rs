@@ -699,17 +699,19 @@ pub fn visible_area_wkt(properties: &HashMap<String, ParameterValue>) -> Option<
 
     let center = projection_center(crs);
     match extract_proj_param_str(crs, "+proj=") {
-        Some("ortho") | Some("gnom") | Some("stere") => {
-            Some(hemisphere_polygon_wkt(center.0, center.1, 88.0))
-        }
+        Some("ortho") | Some("stere") => Some(hemisphere_polygon_wkt(center.0, center.1, 88.0)),
+        Some("gnom") => Some(hemisphere_polygon_wkt(center.0, center.1, 60.0)),
         Some("laea") | Some("aeqd") => todo!("full-globe azimuthal visible area"),
         Some("igh") => Some(igh_outline_wkt()),
         Some("robin") => Some(densified_rectangle_wkt(
-            -180.0, -90.0, 180.0, 90.0,
+            -180.0,
+            -90.0,
+            180.0,
+            90.0,
             [1, 36, 1, 36], // densify left/right meridian edges only
         )),
         Some("merc") => Some(BBox::from_array([-180.0, -85.0, 180.0, 85.0], "").to_polygon_wkt()),
-        Some("mill") | Some("eqc") => {
+        Some("mill") | Some("eqc") | Some("cea") => {
             Some(BBox::from_array([-180.0, -90.0, 180.0, 90.0], "").to_polygon_wkt())
         }
         _ => None,
@@ -812,7 +814,7 @@ fn igh_outline_wkt() -> String {
 /// edges or interruptions, where corner inverse-projection doesn't recover the
 /// full visible lon/lat range.
 fn needs_graticule_clip(proj_name: Option<&str>) -> bool {
-    !matches!(proj_name, Some("merc") | Some("mill") | Some("eqc") | None)
+    !matches!(proj_name, Some("merc") | Some("mill") | Some("eqc") | Some("cea") | None)
 }
 
 fn extract_proj_param_str<'a>(crs: &'a str, key: &str) -> Option<&'a str> {
