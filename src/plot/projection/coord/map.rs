@@ -703,12 +703,21 @@ pub fn visible_area_wkt(properties: &HashMap<String, ParameterValue>) -> Option<
         Some("gnom") => Some(hemisphere_polygon_wkt(center.0, center.1, 60.0)),
         Some("laea") | Some("aeqd") => todo!("full-globe azimuthal visible area"),
         Some("igh") => Some(igh_outline_wkt()),
-        Some("robin") => Some(densified_rectangle_wkt(
+        Some("robin") | Some("moll") | Some("sinu") | Some("eck4") | Some("natearth") => {
+            Some(densified_rectangle_wkt(
+                -180.0,
+                -90.0,
+                180.0,
+                90.0,
+                [1, 36, 1, 36], // densify left/right meridian edges only
+            ))
+        }
+        Some("wintri") => Some(densified_rectangle_wkt(
             -180.0,
             -90.0,
             180.0,
             90.0,
-            [1, 36, 1, 36], // densify left/right meridian edges only
+            [36, 36, 36, 36], // all edges curved
         )),
         Some("merc") => Some(BBox::from_array([-180.0, -85.0, 180.0, 85.0], "").to_polygon_wkt()),
         Some("mill") | Some("eqc") | Some("cea") => {
