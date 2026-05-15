@@ -13,17 +13,26 @@ fn apply_clip_boundary(
     source: &str,
     crs: &str,
     clip_table: &str,
+    seam_slit: Option<&str>,
 ) -> String {
     let clip_geom = format!("(SELECT geom FROM {clip_table})");
+    let source_esc = source.replace('\'', "''");
+    let crs_esc = crs.replace('\'', "''");
+
+    let clipped = if let Some(slit_wkt) = seam_slit {
+        format!(
+            "ST_Difference(ST_Intersection({col}, {clip_geom}), \
+             ST_GeomFromText('{slit_wkt}'))"
+        )
+    } else {
+        format!("ST_Intersection({col}, {clip_geom})")
+    };
+
     let geom_expr = format!(
         "ST_MakeValid(ST_Transform(\
-            ST_Intersection({col}, {clip_geom}),\
-            '{source}', '{crs}', always_xy := true\
+            {clipped},\
+            '{source_esc}', '{crs_esc}', always_xy := true\
         ))",
-        col = col,
-        clip_geom = clip_geom,
-        source = source.replace('\'', "''"),
-        crs = crs.replace('\'', "''"),
     );
     format!(
         "SELECT * REPLACE ({geom_expr} AS {col}) FROM ({query}) \
@@ -74,12 +83,20 @@ impl GeomTrait for Spatial {
             };
 
             if projection.computed.contains_key("clip_boundary") {
+                let seam_slit = projection
+                    .computed
+                    .get("seam_slit")
+                    .and_then(|v| match v {
+                        ParameterValue::String(s) => Some(s.as_str()),
+                        _ => None,
+                    });
                 return Ok(apply_clip_boundary(
                     query,
                     &col,
                     source,
                     crs,
                     CLIP_BOUNDARY_TABLE,
+                    seam_slit,
                 ));
             }
 

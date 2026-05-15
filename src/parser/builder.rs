@@ -1135,6 +1135,8 @@ fn parse_coord_system(
         "eckert4" => map_proj("eck4"),
         "natural" => map_proj("natearth"),
         "winkel_tripel" => map_proj("wintri"),
+        "albers" => map_proj("aea +lat_1=29.5 +lat_2=45.5"),
+        "lambert_conformal" => map_proj("lcc +lat_1=29.5 +lat_2=45.5"),
         "lambert" => map_proj("laea"),
         "azimuthal_equidistant" => map_proj("aeqd"),
         "igh" => map_proj("igh"),
