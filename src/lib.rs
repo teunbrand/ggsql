@@ -1029,7 +1029,12 @@ mod integration_tests {
         let json_str = writer.write(&prepared.specs[0], &prepared.data).unwrap();
         let vl_spec: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        assert_eq!(vl_spec["layer"][0]["mark"]["type"], "geoshape");
+        let layers = vl_spec["layer"].as_array().unwrap();
+        let geoshape_layer = layers
+            .iter()
+            .find(|l| l["mark"]["type"] == "geoshape")
+            .expect("should have a geoshape layer");
+        assert_eq!(geoshape_layer["mark"]["type"], "geoshape");
 
         let data = vl_spec["data"]["values"].as_array().unwrap();
         let layer_key = prepared.specs[0].layers[0].data_key.as_ref().unwrap();

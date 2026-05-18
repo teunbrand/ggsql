@@ -1369,7 +1369,6 @@ pub fn prepare_data_with_reader(query: &str, reader: &dyn Reader) -> Result<Prep
     }
 
     // Apply projection transforms (post-stat, pre-fetch)
-    // TODO: infer coord from geom types (e.g., DRAW spatial implies Map coord)
     let mut project = specs[0]
         .project
         .take()

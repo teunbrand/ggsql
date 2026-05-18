@@ -84,7 +84,7 @@ impl CoordTrait for Map {
 
         // Step 1: Detect source CRS from geometry columns if not explicitly set
         if !projection.properties.contains_key("source") {
-            if let Some(srid) = detect_source_srid(layers, layer_queries, execute_query) {
+            if let Some(srid) = detect_source_srid(layers, layer_queries, execute_query)? {
                 projection
                     .properties
                     .insert("source".to_string(), ParameterValue::String(srid));
@@ -97,7 +97,13 @@ impl CoordTrait for Map {
         };
         let crs = match projection.properties.get("crs") {
             Some(ParameterValue::String(s)) => s.clone(),
-            _ => return Ok(()),
+            _ => {
+                projection.properties.insert(
+                    "crs".to_string(),
+                    ParameterValue::String(source.clone()),
+                );
+                source.clone()
+            }
         };
 
         // Validate CRS by attempting a single point transform
@@ -743,8 +749,9 @@ fn detect_source_srid(
     layers: &[Layer],
     layer_queries: &[String],
     execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
-) -> Option<String> {
+) -> crate::Result<Option<String>> {
     let geom_col = naming::quote_ident(&naming::aesthetic_column("geometry"));
+    let mut detected: Option<String> = None;
 
     for (idx, layer) in layers.iter().enumerate() {
         if layer.geom.geom_type() != GeomType::Spatial {
@@ -766,12 +773,23 @@ fn detect_source_srid(
             {
                 let srid = arr.value(0);
                 if srid != 0 {
-                    return Some(format!("EPSG:{srid}"));
+                    let crs = format!("EPSG:{srid}");
+                    if let Some(ref prev) = detected {
+                        if *prev != crs {
+                            return Err(crate::GgsqlError::ValidationError(format!(
+                                "Spatial layers have conflicting CRS: '{}' vs '{}'. \
+                                 Set PROJECT source to specify which CRS the data is in.",
+                                prev, crs
+                            )));
+                        }
+                    } else {
+                        detected = Some(crs);
+                    }
                 }
             }
         }
     }
-    None
+    Ok(detected)
 }
 
 // ---------------------------------------------------------------------------

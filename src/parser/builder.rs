@@ -283,13 +283,15 @@ fn build_visualise_statement(node: &Node, source: &SourceTree) -> Result<Plot> {
         }
     }
 
-    // Resolve coord (infer from mappings if not explicit)
+    // Resolve coord (infer from mappings and layer types if not explicit)
     // This must happen after parsing but before initialize_aesthetic_context()
     let layer_mappings: Vec<&Mappings> = spec.layers.iter().map(|l| &l.mappings).collect();
+    let layer_geom_types: Vec<GeomType> = spec.layers.iter().map(|l| l.geom.geom_type()).collect();
     if let Some(inferred) = resolve_coord(
         spec.project.as_ref(),
         &spec.global_mappings,
         &layer_mappings,
+        &layer_geom_types,
     )
     .map_err(GgsqlError::ParseError)?
     {
