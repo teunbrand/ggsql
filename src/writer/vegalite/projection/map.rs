@@ -123,11 +123,11 @@ impl ProjectionRenderer for MapProjection {
     }
 
     fn position_channels(&self) -> (&'static str, &'static str) {
-        ("x", "y")
+        ("longitude", "latitude")
     }
 
     fn offset_channels(&self) -> (&'static str, &'static str) {
-        ("xOffset", "yOffset")
+        ("longitude", "latitude")
     }
 
     fn transform_layers(&self, _spec: &Plot, vl_spec: &mut Value) -> Result<()> {
@@ -210,10 +210,13 @@ mod tests {
     #[test]
     fn test_map_projection_channels() {
         let renderer = MapProjection::new(None, None);
-        assert_eq!(renderer.position_channels(), ("x", "y"));
-        assert_eq!(renderer.offset_channels(), ("xOffset", "yOffset"));
-        assert_eq!(renderer.map_position("pos1"), Some("x".to_string()));
-        assert_eq!(renderer.map_position("pos2"), Some("y".to_string()));
+        assert_eq!(renderer.position_channels(), ("longitude", "latitude"));
+        assert_eq!(renderer.offset_channels(), ("longitude", "latitude"));
+        assert_eq!(
+            renderer.map_position("pos1"),
+            Some("longitude".to_string())
+        );
+        assert_eq!(renderer.map_position("pos2"), Some("latitude".to_string()));
     }
 
     #[test]
