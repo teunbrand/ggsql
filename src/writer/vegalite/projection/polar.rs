@@ -18,7 +18,6 @@ const POLAR_OUTER: f64 = 1.0;
 /// `1 - paddingInner` for band scales, which is ~0.9).
 const POLAR_BAND_FRACTION: f64 = 0.9;
 
-
 /// Resolved geometry and scale context for polar specs.
 ///
 /// Holds angular range, radius bounds, VL expression strings for the panel

@@ -53,13 +53,23 @@ pub fn resolve_coord(
 
     // Check global mappings
     for aesthetic in global_mappings.aesthetics.keys() {
-        check_aesthetic(aesthetic, &mut found_cartesian, &mut found_polar, &mut found_map);
+        check_aesthetic(
+            aesthetic,
+            &mut found_cartesian,
+            &mut found_polar,
+            &mut found_map,
+        );
     }
 
     // Check layer mappings
     for layer_map in layer_mappings {
         for aesthetic in layer_map.aesthetics.keys() {
-            check_aesthetic(aesthetic, &mut found_cartesian, &mut found_polar, &mut found_map);
+            check_aesthetic(
+                aesthetic,
+                &mut found_cartesian,
+                &mut found_polar,
+                &mut found_map,
+            );
         }
     }
 

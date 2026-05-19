@@ -313,8 +313,13 @@ fn build_layer_encoding(
         // Vega-Lite — not type, scale, axis, or title.
         if matches!(
             channel_name.as_str(),
-            "x2" | "y2" | "theta2" | "radius2" | "longitude" | "latitude"
-                | "longitude2" | "latitude2"
+            "x2" | "y2"
+                | "theta2"
+                | "radius2"
+                | "longitude"
+                | "latitude"
+                | "longitude2"
+                | "latitude2"
         ) {
             let secondary_encoding = match value {
                 AestheticValue::Column { name: col, .. } => json!({"field": col}),

@@ -1080,8 +1080,14 @@ mod integration_tests {
             "all visible features should have valid geometry"
         );
 
-        assert!(!vl_spec["projection"]["scale"].is_null(), "projection.scale should be present");
-        assert!(!vl_spec["projection"]["translate"].is_null(), "projection.translate should be present");
+        assert!(
+            !vl_spec["projection"]["scale"].is_null(),
+            "projection.scale should be present"
+        );
+        assert!(
+            !vl_spec["projection"]["translate"].is_null(),
+            "projection.translate should be present"
+        );
     }
 
     #[cfg(feature = "spatial")]
@@ -1274,7 +1280,10 @@ mod integration_tests {
             .collect();
         assert_eq!(spatial_rows.len(), 1);
         let geom = &spatial_rows[0]["geometry"];
-        assert!(!geom.is_null(), "Point in source CRS should project successfully");
+        assert!(
+            !geom.is_null(),
+            "Point in source CRS should project successfully"
+        );
 
         // The projected point should be near (0, 0) in orthographic coords
         // since the projection is centered on the same location.

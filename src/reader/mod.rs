@@ -132,7 +132,6 @@ pub trait SqlDialect {
         format!("ST_GeomFromWKB(CAST({column} AS BLOB))")
     }
 
-
     /// SQL expression to transform a geometry from one CRS to another.
     ///
     /// Default uses `ST_Transform(column, source_crs, target_crs)` which works for DuckDB.

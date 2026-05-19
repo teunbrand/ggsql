@@ -225,8 +225,13 @@ impl Coord {
         dialect: &dyn SqlDialect,
         execute_query: &dyn Fn(&str) -> crate::Result<DataFrame>,
     ) -> crate::Result<()> {
-        self.0
-            .apply_projection_transforms(layers, layer_queries, projection, dialect, execute_query)
+        self.0.apply_projection_transforms(
+            layers,
+            layer_queries,
+            projection,
+            dialect,
+            execute_query,
+        )
     }
 }
 

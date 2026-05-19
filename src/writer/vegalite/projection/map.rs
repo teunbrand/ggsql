@@ -212,10 +212,7 @@ mod tests {
         let renderer = MapProjection::new(None, None);
         assert_eq!(renderer.position_channels(), ("longitude", "latitude"));
         assert_eq!(renderer.offset_channels(), ("longitude", "latitude"));
-        assert_eq!(
-            renderer.map_position("pos1"),
-            Some("longitude".to_string())
-        );
+        assert_eq!(renderer.map_position("pos1"), Some("longitude".to_string()));
         assert_eq!(renderer.map_position("pos2"), Some("latitude".to_string()));
     }
 

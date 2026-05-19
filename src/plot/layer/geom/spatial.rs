@@ -93,9 +93,7 @@ impl GeomTrait for Spatial {
         // WORKAROUND(duckdb-rs#714): normalize column to GEOMETRY since it may
         // be WKB BLOB from the Arrow export workaround.
         let ensure_geom = dialect.sql_ensure_geometry(&col);
-        let geom_query = format!(
-            "SELECT * REPLACE ({ensure_geom} AS {col}) FROM ({query})"
-        );
+        let geom_query = format!("SELECT * REPLACE ({ensure_geom} AS {col}) FROM ({query})");
 
         let geom_expr = if let (true, Some(ParameterValue::String(crs))) =
             (is_map, projection.properties.get("crs"))

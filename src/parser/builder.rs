@@ -1118,7 +1118,10 @@ fn parse_coord_system(
     let map_proj = |proj: &str| -> Result<(Coord, Vec<(String, ParameterValue)>)> {
         Ok((
             Coord::map(),
-            vec![("crs".to_string(), ParameterValue::String(format!("+proj={proj}")))],
+            vec![(
+                "crs".to_string(),
+                ParameterValue::String(format!("+proj={proj}")),
+            )],
         ))
     };
     match text.to_lowercase().as_str() {

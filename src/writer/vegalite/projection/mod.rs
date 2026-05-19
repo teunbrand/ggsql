@@ -140,7 +140,6 @@ pub(super) fn get_projection_renderer(
     }
 }
 
-
 // =============================================================================
 // AxisInfo — reusable across projection types
 // =============================================================================
@@ -236,7 +235,10 @@ mod tests {
         let renderer = PolarProjection::new(None, None, &[]);
         assert_eq!(renderer.map_position("pos1"), Some("radius".to_string()));
         assert_eq!(renderer.map_position("pos2"), Some("theta".to_string()));
-        assert_eq!(renderer.map_position("pos1end"), Some("radius2".to_string()));
+        assert_eq!(
+            renderer.map_position("pos1end"),
+            Some("radius2".to_string())
+        );
         assert_eq!(renderer.map_position("pos2end"), Some("theta2".to_string()));
         assert_eq!(renderer.offset_channels(), ("radiusOffset", "thetaOffset"));
         assert_eq!(
