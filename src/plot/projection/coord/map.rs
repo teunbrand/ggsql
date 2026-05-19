@@ -132,36 +132,54 @@ impl CoordTrait for Map {
                     .apply_projection(&layer_queries[idx], projection, dialect, clip)?;
         }
 
-        // Step 4: Materialize projected spatial layers as temp tables, compute the
-        // data bbox for framing, then convert geometry to WKB for Arrow transport.
+        // Step 4: Materialize projected layers as temp tables, compute data bbox,
+        // then rewrite layer queries to read from those tables.
         let geom_col = naming::aesthetic_column("geometry");
         let geom_col_quoted = naming::quote_ident(&geom_col);
+        let pos1_col = naming::quote_ident(&naming::aesthetic_column("pos1"));
+        let pos2_col = naming::quote_ident(&naming::aesthetic_column("pos2"));
         let bounds_param = projection.properties.get("bounds");
         let mut computed_bbox: Option<BBox> = None;
 
         for (idx, layer) in layers.iter().enumerate() {
-            if layer.geom.geom_type() != GeomType::Spatial {
+            let is_spatial = layer.geom.geom_type() == GeomType::Spatial;
+            let has_projected_positions = !is_spatial
+                && source != crs
+                && layer.mappings.contains_key("pos1")
+                && layer.mappings.contains_key("pos2");
+
+            if !is_spatial && !has_projected_positions {
                 continue;
             }
+
             let table_name = format!("{}_proj", naming::layer_key(idx));
             for stmt in
                 dialect.create_or_replace_temp_table_sql(&table_name, &[], &layer_queries[idx])
             {
                 execute_query(&stmt)?;
             }
-
             let table_quoted = naming::quote_ident(&table_name);
 
             if needs_computed_bbox(bounds_param) {
-                let sql = dialect.sql_geometry_bbox(&geom_col_quoted, &table_quoted);
-                if let Ok(df) = execute_query(&sql) {
+                let bbox_sql = if is_spatial {
+                    dialect.sql_geometry_bbox(&geom_col_quoted, &table_quoted)
+                } else {
+                    format!(
+                        "SELECT MIN({pos1_col}), MIN({pos2_col}), \
+                         MAX({pos1_col}), MAX({pos2_col}) FROM {table_quoted}"
+                    )
+                };
+                if let Ok(df) = execute_query(&bbox_sql) {
                     computed_bbox = BBox::merge(computed_bbox, BBox::from_df(&df, &crs))?;
                 }
             }
 
-            let wkb_expr = dialect.sql_geometry_to_wkb(&geom_col_quoted);
-            layer_queries[idx] =
-                format!("SELECT * REPLACE ({wkb_expr} AS {geom_col_quoted}) FROM {table_quoted}");
+            layer_queries[idx] = if is_spatial {
+                let wkb_expr = dialect.sql_geometry_to_wkb(&geom_col_quoted);
+                format!("SELECT * REPLACE ({wkb_expr} AS {geom_col_quoted}) FROM {table_quoted}")
+            } else {
+                format!("SELECT * FROM {table_quoted}")
+            };
         }
 
         // Step 5: Resolve final frame bbox from user bounds + data bounds + world bounds

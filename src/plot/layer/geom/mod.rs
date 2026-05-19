@@ -21,7 +21,7 @@
 //! ```
 
 use crate::plot::types::DefaultAestheticValue;
-use crate::{DataFrame, Mappings, Result};
+use crate::{naming, DataFrame, Mappings, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -330,6 +330,45 @@ pub trait GeomTrait: std::fmt::Debug + std::fmt::Display + Send + Sync {
         }
         valid
     }
+}
+
+/// Project pos1/pos2 columns through the map CRS transform.
+///
+/// When the coordinate system is Map with a CRS, wraps the position columns
+/// with ST_X/ST_Y(ST_Transform(ST_Point(pos1, pos2), source, crs)). Returns
+/// the query unchanged for non-map coords or when source == crs.
+pub(crate) fn project_position_columns(
+    query: &str,
+    projection: &Projection,
+    dialect: &dyn SqlDialect,
+) -> Result<String> {
+    use crate::plot::projection::coord::CoordKind;
+
+    if projection.coord.coord_kind() != CoordKind::Map {
+        return Ok(query.to_string());
+    }
+    let crs = match projection.properties.get("crs") {
+        Some(ParameterValue::String(s)) => s.as_str(),
+        _ => return Ok(query.to_string()),
+    };
+    let source = match projection.properties.get("source") {
+        Some(ParameterValue::String(s)) => s.as_str(),
+        _ => "EPSG:4326",
+    };
+    if source == crs {
+        return Ok(query.to_string());
+    }
+
+    let pos1 = naming::quote_ident(&naming::aesthetic_column("pos1"));
+    let pos2 = naming::quote_ident(&naming::aesthetic_column("pos2"));
+    let point_expr = format!("ST_Point({pos1}, {pos2})");
+    let transformed = dialect.sql_st_transform(&point_expr, source, crs);
+    let proj_col = naming::quote_ident("__ggsql_proj_pt__");
+
+    Ok(format!(
+        "SELECT * REPLACE (ST_X({proj_col}) AS {pos1}, ST_Y({proj_col}) AS {pos2}) \
+         FROM (SELECT *, {transformed} AS {proj_col} FROM ({query}))"
+    ))
 }
 
 /// True when `parameters["aggregate"]` is set to a non-null string or array.
