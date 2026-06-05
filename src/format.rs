@@ -217,38 +217,52 @@ pub fn apply_label_template(
     result
 }
 
-/// Determine the minimum decimal precision needed to represent all numeric breaks
-/// consistently. Returns `None` if there are no numeric breaks or all are integers.
+/// Determine the number of decimal places needed to display numeric breaks
+/// consistently. Based on the algorithm from R's `scales::precision()`:
+/// uses the smallest inter-break difference to derive display precision.
+/// Returns `None` if there are fewer than 2 numeric breaks or all are integers.
 fn compute_numeric_precision(breaks: &[ArrayElement]) -> Option<usize> {
-    let mut max_decimals: usize = 0;
-    let mut has_numbers = false;
+    let tol = f64::EPSILON.sqrt();
 
-    for elem in breaks {
-        if let ArrayElement::Number(n) = elem {
-            has_numbers = true;
-            let decimals = decimal_places(*n);
-            if decimals > max_decimals {
-                max_decimals = decimals;
-            }
-        }
+    let mut numbers: Vec<f64> = breaks
+        .iter()
+        .filter_map(|e| match e {
+            ArrayElement::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+
+    if numbers.len() < 2 {
+        return None;
     }
 
-    if has_numbers && max_decimals > 0 {
-        Some(max_decimals)
+    numbers.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let smallest_diff = numbers
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .filter(|d| *d > 0.0)
+        .fold(f64::INFINITY, f64::min);
+
+    if smallest_diff == f64::INFINITY || smallest_diff < tol {
+        return None;
+    }
+
+    let mut precision = 10f64.powf(smallest_diff.log10().floor() - 1.0);
+
+    // If all values are multiples of 10*precision, coarsen by one level
+    if numbers
+        .iter()
+        .all(|&x| ((x / precision).round() % 10.0).abs() < tol)
+    {
+        precision *= 10.0;
+    }
+
+    let n_decimals = (-precision.log10().floor()) as isize;
+    if n_decimals > 0 {
+        Some(n_decimals.min(20) as usize)
     } else {
         None
-    }
-}
-
-/// Count the number of meaningful decimal places in a float.
-fn decimal_places(n: f64) -> usize {
-    if n.fract().abs() < f64::EPSILON * n.abs().max(1.0) {
-        return 0;
-    }
-    let s = format!("{}", n);
-    match s.find('.') {
-        Some(pos) => s.len() - pos - 1,
-        None => 0,
     }
 }
 
@@ -600,5 +614,19 @@ mod tests {
         assert_eq!(result.get("10"), Some(&Some("10".to_string())));
         assert_eq!(result.get("20"), Some(&Some("20".to_string())));
         assert_eq!(result.get("30"), Some(&Some("30".to_string())));
+    }
+
+    #[test]
+    fn test_plain_placeholder_small_fractional_steps() {
+        let breaks = vec![
+            ArrayElement::Number(0.0),
+            ArrayElement::Number(0.05),
+            ArrayElement::Number(0.1),
+        ];
+        let result = apply_label_template(&breaks, "{}", &None);
+
+        assert_eq!(result.get("0"), Some(&Some("0.00".to_string())));
+        assert_eq!(result.get("0.05"), Some(&Some("0.05".to_string())));
+        assert_eq!(result.get("0.1"), Some(&Some("0.10".to_string())));
     }
 }
