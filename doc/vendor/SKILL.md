@@ -404,7 +404,7 @@ DRAW histogram MAPPING body_mass AS x REMAPPING density AS y  -- density instead
 Kernel density estimation. Required: x. Stats: `density`, `intensity`. Settings: `position` (default `'identity'`), `bandwidth`, `adjust` (default 1), `kernel` (`'gaussian'` default, `'epanechnikov'`, `'triangular'`, `'rectangular'`, `'biweight'`, `'cosine'`).
 
 ### boxplot
-Five-number summary with outliers. Required: x (categorical), y (continuous). Stats: `type`, `value`. Settings: `position` (default `'dodge'`), `outliers` (default true), `coef` (whisker IQR multiple, default 1.5), `width` (default 0.9).
+Five-number summary with outliers. Required: x (categorical), y (continuous). Stats: `type`, `value`. Settings: `position` (default `'dodge'`), `outliers` (default true), `coef` (whisker IQR multiple, default 1.5), `width` (default 0.9), `hinge` (whisker cap width in points, default null/hidden).
 
 ### violin
 Mirrored kernel density for groups. Required: x (categorical), y (continuous). Stats: `density`, `intensity`. Default remapping: `density AS offset`. Settings: `position` (default `'dodge'`), `bandwidth`, `adjust`, `kernel` (same as density), `width` (default 0.9), `side` (`'both'`/`'left'`/`'bottom'`/`'right'`/`'top'`), `tails` (number or null, default 3).

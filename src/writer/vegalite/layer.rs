@@ -2052,6 +2052,46 @@ impl BoxplotRenderer {
         upper_whiskers["encoding"][value_var1] = y_encoding.clone();
         upper_whiskers["encoding"][value_var2] = y2_encoding.clone();
 
+        // Whisker cap hinges: tick marks at the whisker tips
+        if let Some(ParameterValue::Number(hinge_pts)) = layer.parameters.get("hinge") {
+            let hinge_size = hinge_pts * POINTS_TO_PIXELS;
+            let orient = if is_horizontal {
+                "vertical"
+            } else {
+                "horizontal"
+            };
+            let mut enco = y_encoding.clone();
+            enco["field"] = json!(value2_col);
+
+            let mut lower_hinge = create_layer(
+                &summary_prototype,
+                "lower_whisker",
+                json!({
+                    "type": "tick",
+                    "orient": orient,
+                    "size": hinge_size,
+                    "thickness": 0,
+                    "clip": true
+                }),
+            );
+            lower_hinge["encoding"][value_var1] = enco.clone();
+            layers.push(lower_hinge);
+
+            let mut upper_hinge = create_layer(
+                &summary_prototype,
+                "upper_whisker",
+                json!({
+                    "type": "tick",
+                    "orient": orient,
+                    "size": hinge_size,
+                    "thickness": 0,
+                    "clip": true
+                }),
+            );
+            upper_hinge["encoding"][value_var1] = enco;
+            layers.push(upper_hinge);
+        }
+
         // Resolve the `side` parameter. When `side != "both"`, the box and
         // median tick render at half their normal size and anchor to the
         // categorical centerline so they only occupy one side of each band.
