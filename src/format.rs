@@ -72,10 +72,21 @@ fn parse_placeholders(template: &str) -> Vec<ParsedPlaceholder> {
         .collect()
 }
 
-/// Apply transformation based on placeholder type
-fn apply_transformation(value: &str, placeholder: &Placeholder) -> String {
+/// Apply transformation based on placeholder type.
+/// `precision` controls decimal places for `Plain` placeholders on numeric values.
+fn apply_transformation(
+    value: &str,
+    placeholder: &Placeholder,
+    precision: Option<usize>,
+) -> String {
     match placeholder {
-        Placeholder::Plain => value.to_string(),
+        Placeholder::Plain => match precision {
+            Some(prec) => match value.parse::<f64>() {
+                Ok(n) => format!("{n:.prec$}"),
+                Err(_) => value.to_string(),
+            },
+            None => value.to_string(),
+        },
         Placeholder::Upper => value.to_uppercase(),
         Placeholder::Lower => value.to_lowercase(),
         Placeholder::Title => to_title_case(value),
@@ -172,6 +183,19 @@ pub fn apply_label_template(
     // Parse all placeholders once
     let placeholders = parse_placeholders(template);
 
+    // For numeric breaks with a plain placeholder, determine consistent decimal
+    // precision so that e.g. [54.5, 55, 55.5] formats as ["54.5", "55.0", "55.5"]
+    // rather than stripping the ".0" from the integer-valued break.
+    let has_plain = placeholders
+        .iter()
+        .any(|p| matches!(p.placeholder, Placeholder::Plain))
+        || placeholders.is_empty();
+    let numeric_precision = if has_plain {
+        compute_numeric_precision(breaks)
+    } else {
+        None
+    };
+
     for elem in breaks {
         // Skip null values
         if matches!(elem, ArrayElement::Null) {
@@ -181,12 +205,51 @@ pub fn apply_label_template(
 
         // Only apply template if no explicit mapping exists
         result.entry(key.clone()).or_insert_with(|| {
-            // Use shared format_value helper
-            Some(format_value(&key, template, &placeholders))
+            Some(format_value(
+                &key,
+                template,
+                &placeholders,
+                numeric_precision,
+            ))
         });
     }
 
     result
+}
+
+/// Determine the minimum decimal precision needed to represent all numeric breaks
+/// consistently. Returns `None` if there are no numeric breaks or all are integers.
+fn compute_numeric_precision(breaks: &[ArrayElement]) -> Option<usize> {
+    let mut max_decimals: usize = 0;
+    let mut has_numbers = false;
+
+    for elem in breaks {
+        if let ArrayElement::Number(n) = elem {
+            has_numbers = true;
+            let decimals = decimal_places(*n);
+            if decimals > max_decimals {
+                max_decimals = decimals;
+            }
+        }
+    }
+
+    if has_numbers && max_decimals > 0 {
+        Some(max_decimals)
+    } else {
+        None
+    }
+}
+
+/// Count the number of meaningful decimal places in a float.
+fn decimal_places(n: f64) -> usize {
+    if n.fract().abs() < f64::EPSILON * n.abs().max(1.0) {
+        return 0;
+    }
+    let s = format!("{}", n);
+    match s.find('.') {
+        Some(pos) => s.len() - pos - 1,
+        None => 0,
+    }
 }
 
 /// Apply label formatting template to a DataFrame column.
@@ -258,7 +321,7 @@ pub fn format_dataframe_column(
     let placeholders = parse_placeholders(template);
     let formatted_owned: Vec<Option<String>> = string_values
         .into_iter()
-        .map(|opt| opt.map(|s| format_value(&s, template, &placeholders)))
+        .map(|opt| opt.map(|s| format_value(&s, template, &placeholders, None)))
         .collect();
 
     let formatted_refs: Vec<Option<&str>> =
@@ -271,7 +334,12 @@ pub fn format_dataframe_column(
 }
 
 /// Format a single value using template and parsed placeholders
-fn format_value(value: &str, template: &str, placeholders: &[ParsedPlaceholder]) -> String {
+fn format_value(
+    value: &str,
+    template: &str,
+    placeholders: &[ParsedPlaceholder],
+    precision: Option<usize>,
+) -> String {
     if placeholders.is_empty() {
         // No placeholders - use template as literal string
         template.to_string()
@@ -279,7 +347,7 @@ fn format_value(value: &str, template: &str, placeholders: &[ParsedPlaceholder])
         // Replace each placeholder with its transformed value
         let mut result = template.to_string();
         for parsed in placeholders.iter().rev() {
-            let transformed = apply_transformation(value, &parsed.placeholder);
+            let transformed = apply_transformation(value, &parsed.placeholder, precision);
             result = result.replace(&parsed.match_text, &transformed);
         }
         result
@@ -504,5 +572,33 @@ mod tests {
         let result = apply_label_template(&breaks, "{:num %d}", &None);
 
         assert_eq!(result.get("42"), Some(&Some("42".to_string())));
+    }
+
+    #[test]
+    fn test_plain_placeholder_consistent_decimal_precision() {
+        let breaks = vec![
+            ArrayElement::Number(54.5),
+            ArrayElement::Number(55.0),
+            ArrayElement::Number(55.5),
+        ];
+        let result = apply_label_template(&breaks, "{}", &None);
+
+        assert_eq!(result.get("54.5"), Some(&Some("54.5".to_string())));
+        assert_eq!(result.get("55"), Some(&Some("55.0".to_string())));
+        assert_eq!(result.get("55.5"), Some(&Some("55.5".to_string())));
+    }
+
+    #[test]
+    fn test_plain_placeholder_all_integers_no_decimals() {
+        let breaks = vec![
+            ArrayElement::Number(10.0),
+            ArrayElement::Number(20.0),
+            ArrayElement::Number(30.0),
+        ];
+        let result = apply_label_template(&breaks, "{}", &None);
+
+        assert_eq!(result.get("10"), Some(&Some("10".to_string())));
+        assert_eq!(result.get("20"), Some(&Some("20".to_string())));
+        assert_eq!(result.get("30"), Some(&Some("30".to_string())));
     }
 }
