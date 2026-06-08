@@ -67,6 +67,11 @@ impl GeomTrait for Boxplot {
                 constraint: ParamConstraint::number_range(0.0, 1.0),
             },
             ParamDefinition {
+                name: "hinge",
+                default: DefaultParamValue::Null,
+                constraint: ParamConstraint::number_min(0.0),
+            },
+            ParamDefinition {
                 name: "position",
                 default: DefaultParamValue::String("dodge"),
                 constraint: ParamConstraint::string_option(POSITION_VALUES),
@@ -560,7 +565,7 @@ mod tests {
         let boxplot = Boxplot;
         let params = boxplot.default_params();
 
-        assert_eq!(params.len(), 5);
+        assert_eq!(params.len(), 6);
 
         // Find and verify outliers param
         let outliers_param = params.iter().find(|p| p.name == "outliers").unwrap();

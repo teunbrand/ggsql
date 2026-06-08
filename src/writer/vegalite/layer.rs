@@ -1760,11 +1760,11 @@ impl GeomRenderer for RangeRenderer {
         _prepared: &PreparedData,
         context: &RenderContext,
     ) -> Result<Vec<Value>> {
-        // Get width parameter (in points)
-        let width = if let Some(ParameterValue::Number(num)) = layer.parameters.get("width") {
+        // Get hinge parameter (in points)
+        let width = if let Some(ParameterValue::Number(num)) = layer.parameters.get("hinge") {
             (*num) * POINTS_TO_PIXELS
         } else {
-            // If no width specified, return just the main error bar without hinges
+            // If no hinge specified, return just the main error bar without hinges
             return Ok(vec![layer_spec]);
         };
 
@@ -2159,11 +2159,88 @@ impl BoxplotRenderer {
                 size_key: box_size,
             }),
         );
-        median_line["encoding"][value_var1] = y_encoding;
+        median_line["encoding"][value_var1] = y_encoding.clone();
         apply_side_shift(&mut median_line);
 
         layers.push(lower_whiskers);
         layers.push(upper_whiskers);
+
+        // Whisker cap hinges: tick marks at the whisker tips
+        if let Some(ParameterValue::Number(hinge_pts)) = layer.parameters.get("hinge") {
+            let hinge_size = if half_side {
+                hinge_pts * POINTS_TO_PIXELS / 2.0
+            } else {
+                hinge_pts * POINTS_TO_PIXELS
+            };
+            let orient = if is_horizontal {
+                "vertical"
+            } else {
+                "horizontal"
+            };
+
+            let hinge_mark = json!({
+                "type": "tick",
+                "orient": orient,
+                "size": hinge_size,
+                "thickness": 0,
+                "clip": true
+            });
+
+            let mut enco = y_encoding.clone();
+            enco["field"] = json!(value2_col);
+
+            let mut lower_hinge =
+                create_layer(&summary_prototype, "lower_whisker", hinge_mark.clone());
+            lower_hinge["encoding"][value_var1] = enco.clone();
+            if let Some(Value::Object(ref mut enc)) = lower_hinge.get_mut("encoding") {
+                enc.remove(value_var2);
+            }
+
+            let mut upper_hinge = create_layer(&summary_prototype, "upper_whisker", hinge_mark);
+            upper_hinge["encoding"][value_var1] = enco;
+            if let Some(Value::Object(ref mut enc)) = upper_hinge.get_mut("encoding") {
+                enc.remove(value_var2);
+            }
+
+            // When half_side, shift the hinge tick toward the chosen side
+            // using the offset channel. Convert the pixel shift to a band
+            // fraction via bandwidth() so it uses the same scale as dodge.
+            if half_side {
+                let sign = if side_positive { 1.0 } else { -1.0 };
+                let hinge_offset_col = "__ggsql_hinge_offset__";
+                let calc_expr = format!(
+                    "(datum[\"{base}\"] != null ? datum[\"{base}\"] : 0) + {sign} * {px} / bandwidth('{axis}')",
+                    base = base_offset_col,
+                    sign = sign,
+                    px = hinge_size / 2.0,
+                    axis = axis,
+                );
+                let apply_hinge_offset = |layer_spec: &mut Value| {
+                    let existing = layer_spec
+                        .get("transform")
+                        .and_then(|t| t.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut transforms = existing;
+                    transforms.push(json!({
+                        "calculate": calc_expr,
+                        "as": hinge_offset_col,
+                    }));
+                    layer_spec["transform"] = json!(transforms);
+                    layer_spec["encoding"][offset_channel] = json!({
+                        "field": hinge_offset_col,
+                        "type": "quantitative",
+                        "scale": {"domain": [-0.5, 0.5]},
+                    });
+                };
+                apply_hinge_offset(&mut lower_hinge);
+                apply_hinge_offset(&mut upper_hinge);
+            }
+
+            layers.push(lower_hinge);
+            layers.push(upper_hinge);
+        }
+
         layers.push(box_part);
         layers.push(median_line);
 
