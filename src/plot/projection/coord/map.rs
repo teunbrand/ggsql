@@ -16,7 +16,7 @@ use crate::DataFrame;
 
 pub(crate) fn apply_map_transforms(
     map_proj: &dyn MapProjectionTrait,
-    layers: &[Layer],
+    layers: &mut [Layer],
     layer_queries: &mut [String],
     projection: &mut super::super::Projection,
     dialect: &dyn SqlDialect,
@@ -54,22 +54,20 @@ pub(crate) fn apply_map_transforms(
         world_bbox = compute_world_bbox(&source, &target, dialect, execute_query);
         boundary_lonlat = Some(b);
     }
-    let clip = boundary_lonlat.is_some();
+    projection.properties.insert(
+        "clip".to_string(),
+        ParameterValue::Boolean(boundary_lonlat.is_some()),
+    );
 
     // Step 3: Apply per-layer projection (ST_Transform, clip to horizon)
-    for (idx, layer) in layers.iter().enumerate() {
-        let columns: Vec<String> = layer
-            .mappings
-            .aesthetics
-            .keys()
-            .map(|k| naming::aesthetic_column(k))
-            .collect();
+    for (idx, layer) in layers.iter_mut().enumerate() {
         layer_queries[idx] = layer.geom.apply_projection(
             &layer_queries[idx],
             projection,
             dialect,
-            clip,
-            &columns,
+            &mut layer.mappings,
+            &mut layer.partition_by,
+            &mut layer.parameters,
         )?;
     }
 
@@ -100,12 +98,7 @@ pub(crate) fn apply_map_transforms(
         }
 
         layer_queries[idx] = if is_spatial {
-            let columns: Vec<String> = layer
-                .mappings
-                .aesthetics
-                .keys()
-                .map(|k| naming::aesthetic_column(k))
-                .collect();
+            let columns = layer.mappings.column_names();
             let geom_col_quoted = naming::quote_ident(&naming::aesthetic_column("geometry"));
             let wkb_expr = dialect.sql_geometry_to_wkb(&geom_col_quoted);
             dialect.sql_select_replace(
