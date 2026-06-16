@@ -3312,6 +3312,53 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "duckdb", feature = "spatial"))]
+    #[test]
+    fn test_partition_by_preserved_through_map_projection() {
+        let reader = DuckDBReader::from_connection_string("duckdb://memory").unwrap();
+        reader.connection().execute_batch("LOAD spatial").unwrap();
+        reader
+            .connection()
+            .execute(
+                "CREATE TABLE routes AS \
+                 SELECT 10.0 AS lon, 50.0 AS lat, 'A' AS direction, 1 AS grp \
+                 UNION ALL SELECT 20.0, 55.0, 'A', 1 \
+                 UNION ALL SELECT 30.0, 52.0, 'R' , 2",
+                duckdb::params![],
+            )
+            .unwrap();
+
+        let query = r#"
+            SELECT lon, lat, direction, grp FROM routes
+            VISUALISE lon AS x, lat AS y
+            DRAW path PARTITION BY direction, grp
+            PROJECT x, y TO orthographic
+        "#;
+
+        let result = prepare_data_with_reader(query, &reader);
+        assert!(
+            result.is_ok(),
+            "PARTITION BY columns should survive map projection: {:?}",
+            result.err()
+        );
+
+        let prepared = result.unwrap();
+        let layer = &prepared.specs[0].layers[0];
+        let data_key = layer.data_key.as_ref().unwrap();
+        let df = prepared.data.get(data_key).unwrap();
+        let col_names = df.get_column_names();
+        assert!(
+            col_names.iter().any(|c| c == "direction"),
+            "partition column 'direction' missing from output data; columns: {:?}",
+            col_names
+        );
+        assert!(
+            col_names.iter().any(|c| c == "grp"),
+            "partition column 'grp' missing from output data; columns: {:?}",
+            col_names
+        );
+    }
+
     #[cfg(feature = "duckdb")]
     #[test]
     fn test_case_insensitive_facet() {
