@@ -530,19 +530,7 @@ where
     // Note: Facet aesthetics are already in partition_by via add_discrete_columns_to_partition_by,
     // so we don't add facet.get_variables() here (which would add original column names
     // instead of aesthetic column names, breaking pre-stat transforms like domain censoring).
-    let mut group_by: Vec<String> = Vec::new();
-    for col in &layer.partition_by {
-        group_by.push(col.clone());
-    }
-
-    // Add literal aesthetic columns to group_by so they survive stat transforms.
-    // Since literal columns contain constant values (same for every row), adding them
-    // to GROUP BY doesn't affect aggregation results - they're simply preserved.
-    for col in &literal_columns {
-        if !group_by.contains(col) {
-            group_by.push(col.clone());
-        }
-    }
+    let group_by = crate::util::set_union(layer.partition_by.clone(), &literal_columns);
 
     // Apply statistical transformation (uses aesthetic names)
     let stat_result = layer.geom.apply_stat_transform(
