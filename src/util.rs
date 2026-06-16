@@ -77,6 +77,16 @@ fn format_quoted_list<T: Display>(items: &[T], quote: char, conjunction: &str) -
     format_list(&quoted, conjunction)
 }
 
+/// Return the set union of `old` and `new`, preserving order and deduplicating.
+pub fn set_union(mut old: Vec<String>, new: &[String]) -> Vec<String> {
+    for item in new {
+        if !old.contains(item) {
+            old.push(item.clone());
+        }
+    }
+    old
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

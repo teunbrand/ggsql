@@ -69,6 +69,8 @@ impl GeomTrait for Segment {
         partition_by.push(naming::DENSIFY_ID_COLUMN.to_string());
         parameters.insert("densified".to_string(), ParameterValue::Boolean(true));
 
+        let expanded_columns = crate::util::set_union(expanded_columns, partition_by);
+
         let densified = densify_edges(
             &expanded,
             dialect,

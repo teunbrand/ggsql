@@ -58,7 +58,7 @@ impl GeomTrait for Rule {
         // The rule input always has one position column named __ggsql_aes_pos1__
         // regardless of whether the aesthetic key is "pos1" or "pos2" — the executor
         // normalizes it to the pos1 slot.
-        let columns = vec![naming::aesthetic_column("pos1")];
+        let columns = crate::util::set_union(vec![naming::aesthetic_column("pos1")], partition_by);
 
         let has_pos1 = mappings.contains_key("pos1");
         let bbox_expr = match projection.coord.coord_kind() {
@@ -79,6 +79,8 @@ impl GeomTrait for Rule {
 
         partition_by.push(naming::DENSIFY_ID_COLUMN.to_string());
         parameters.insert("densified".to_string(), ParameterValue::Boolean(true));
+
+        let expanded_columns = crate::util::set_union(expanded_columns, partition_by);
 
         let densified = densify_edges(
             &expanded,
