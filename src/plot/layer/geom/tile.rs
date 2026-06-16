@@ -222,7 +222,7 @@ impl GeomTrait for Tile {
             return Ok(query.to_string());
         }
 
-        let columns = mappings.column_names();
+        let columns = crate::util::set_union(mappings.column_names(), partition_by);
 
         // Only densify continuous tiles (those parameterized by pos1min/pos1max/pos2min/pos2max).
         // Discrete tiles use categorical positions and don't appear on maps.
@@ -239,6 +239,8 @@ impl GeomTrait for Tile {
 
         partition_by.push(naming::DENSIFY_ID_COLUMN.to_string());
         parameters.insert("densified".to_string(), ParameterValue::Boolean(true));
+
+        let expanded_columns = crate::util::set_union(expanded_columns, partition_by);
 
         let densified = densify_edges(
             &expanded,

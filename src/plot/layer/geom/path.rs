@@ -53,7 +53,7 @@ impl GeomTrait for Path {
         if !needs_projection(projection) {
             return Ok(query.to_string());
         }
-        let columns = mappings.column_names();
+        let columns = crate::util::set_union(mappings.column_names(), partition_by);
         let densified = densify_edges(
             query,
             dialect,

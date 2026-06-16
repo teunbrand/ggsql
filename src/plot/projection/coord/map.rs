@@ -98,7 +98,8 @@ pub(crate) fn apply_map_transforms(
         }
 
         layer_queries[idx] = if is_spatial {
-            let columns = layer.mappings.column_names();
+            let columns =
+                crate::util::set_union(layer.mappings.column_names(), &layer.partition_by);
             let geom_col_quoted = naming::quote_ident(&naming::aesthetic_column("geometry"));
             let wkb_expr = dialect.sql_geometry_to_wkb(&geom_col_quoted);
             dialect.sql_select_replace(

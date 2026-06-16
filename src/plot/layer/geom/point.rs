@@ -61,10 +61,10 @@ impl GeomTrait for Point {
         projection: &Projection,
         dialect: &dyn SqlDialect,
         mappings: &mut Mappings,
-        _partition_by: &mut Vec<String>,
+        partition_by: &mut Vec<String>,
         _parameters: &mut std::collections::HashMap<String, crate::plot::types::ParameterValue>,
     ) -> Result<String> {
-        let columns = mappings.column_names();
+        let columns = crate::util::set_union(mappings.column_names(), partition_by);
         project_position_columns(query, projection, dialect, &columns)
     }
 }
